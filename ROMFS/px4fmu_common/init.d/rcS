@@ -472,6 +472,7 @@ then
 	then
 		set FMU_MODE pwm4
 		set AUX_MODE pwm4
+		camera_capture on
 	fi
 
 	# If OUTPUT_MODE == none then something is wrong with setup and we shouldn't try to enable output
