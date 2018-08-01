@@ -42,6 +42,7 @@
  */
 
 #include <px4_config.h>
+#include <ecl/geo/geo.h>
 
 #include <sys/types.h>
 #include <stdint.h>
@@ -69,24 +70,24 @@
 #include "gyro.h"
 #include "mpu9250.h"
 
-MPU9250_gyro::MPU9250_gyro(MPU9250 *parent, const char *path) :
-	CDev("MPU9250_gyro", path),
+MPU9250_accel::MPU9250_accel(MPU9250 *parent, const char *path) :
+	CDev("MPU9250_accel", path),
 	_parent(parent),
-	_gyro_topic(nullptr),
-	_gyro_orb_class_instance(-1),
-	_gyro_class_instance(-1)
+	_accel_topic(nullptr),
+	_accel_orb_class_instance(-1),
+	_accel_class_instance(-1)
 {
 }
 
-MPU9250_gyro::~MPU9250_gyro()
+MPU9250_accel::~MPU9250_accel()
 {
-	if (_gyro_class_instance != -1) {
-		unregister_class_devname(GYRO_BASE_DEVICE_PATH, _gyro_class_instance);
+	if (_accel_class_instance != -1) {
+		unregister_class_devname(ACCEL_BASE_DEVICE_PATH, _accel_class_instance);
 	}
 }
 
 int
-MPU9250_gyro::init()
+MPU9250_accel::init()
 {
 	int ret;
 
@@ -95,41 +96,79 @@ MPU9250_gyro::init()
 
 	/* if probe/setup failed, bail now */
 	if (ret != OK) {
-		DEVICE_DEBUG("gyro init failed");
+		DEVICE_DEBUG("accel init failed");
 		return ret;
 	}
 
-	_gyro_class_instance = register_class_devname(GYRO_BASE_DEVICE_PATH);
+	_accel_class_instance = register_class_devname(ACCEL_BASE_DEVICE_PATH);
 
 	return ret;
 }
 
 void
-MPU9250_gyro::parent_poll_notify()
+MPU9250_accel::parent_poll_notify()
 {
 	poll_notify(POLLIN);
 }
 
 ssize_t
-MPU9250_gyro::read(struct file *filp, char *buffer, size_t buflen)
+MPU9250_accel::read(struct file *filp, char *buffer, size_t buflen)
 {
-	return _parent->gyro_read(filp, buffer, buflen);
+	return _parent->accel_read(filp, buffer, buflen);
 }
 
 int
-MPU9250_gyro::ioctl(struct file *filp, int cmd, unsigned long arg)
+MPU9250_accel::ioctl(struct file *filp, int cmd, unsigned long arg)
 {
+	/*
+	 * Repeated in MPU9250_mag::ioctl
+	 * Both accel and mag CDev could be unused in case of magnetometer only mode or MPU6500
+	 */
 
 	switch (cmd) {
 	case DEVIOCGDEVICEID:
 		return (int)CDev::ioctl(filp, cmd, arg);
 		break;
 
-	/* these are shared with the accel side */
-	case SENSORIOCSPOLLRATE:
+	case SENSORIOCRESET: {
+			return _parent->reset();
+		}
+
+	case SENSORIOCSPOLLRATE: {
+			switch (arg) {
+
+			/* switching to manual polling */
+			case SENSOR_POLLRATE_MANUAL:
+				_parent->stop();
+				_parent->_call_interval = 0;
+				return OK;
+
+			/* external signalling not supported */
+			case SENSOR_POLLRATE_EXTERNAL:
+
+			/* zero would be bad */
+			case 0:
+				return -EINVAL;
+
+			/* set default/max polling rate */
+			case SENSOR_POLLRATE_MAX:
+				return ioctl(filp, SENSORIOCSPOLLRATE, 1000);
+
+			case SENSOR_POLLRATE_DEFAULT:
+				return ioctl(filp, SENSORIOCSPOLLRATE, MPU9250_ACCEL_DEFAULT_RATE);
+
+			/* adjust to a legal polling interval in Hz */
+			default:
+				return _parent->_set_pollrate(arg);
+			}
+		}
+
 	case SENSORIOCGPOLLRATE:
-	case SENSORIOCRESET:
-		return _parent->_accel->ioctl(filp, cmd, arg);
+		if (_parent->_call_interval == 0) {
+			return SENSOR_POLLRATE_MANUAL;
+		}
+
+		return 1000000 / _parent->_call_interval;
 
 	case SENSORIOCSQUEUEDEPTH: {
 			/* lower bound is mandatory, upper bound is a sanity check */
@@ -139,7 +178,7 @@ MPU9250_gyro::ioctl(struct file *filp, int cmd, unsigned long arg)
 
 			irqstate_t flags = px4_enter_critical_section();
 
-			if (!_parent->_gyro_reports->resize(arg)) {
+			if (!_parent->_accel_reports->resize(arg)) {
 				px4_leave_critical_section(flags);
 				return -ENOMEM;
 			}
@@ -149,32 +188,38 @@ MPU9250_gyro::ioctl(struct file *filp, int cmd, unsigned long arg)
 			return OK;
 		}
 
-	case GYROIOCGSAMPLERATE:
+	case ACCELIOCGSAMPLERATE:
 		return _parent->_sample_rate;
 
-	case GYROIOCSSAMPLERATE:
+	case ACCELIOCSSAMPLERATE:
 		_parent->_set_sample_rate(arg);
 		return OK;
 
-	case GYROIOCSSCALE:
-		/* copy scale in */
-		memcpy(&_parent->_gyro_scale, (struct gyro_calibration_s *) arg, sizeof(_parent->_gyro_scale));
-		return OK;
+	case ACCELIOCSSCALE: {
+			/* copy scale, but only if off by a few percent */
+			DEVICE_DEBUG("I'm on bus %d, type %d", _parent->_interface->get_device_bus(), _parent->_device_type);
+			struct accel_calibration_s *s = (struct accel_calibration_s *) arg;
+			float sum = s->x_scale + s->y_scale + s->z_scale;
 
-	case GYROIOCGSCALE:
+			if (sum > 2.0f && sum < 4.0f) {
+				memcpy(&_parent->_accel_scale, s, sizeof(_parent->_accel_scale));
+				return OK;
+
+			} else {
+				return -EINVAL;
+			}
+		}
+
+	case ACCELIOCGSCALE:
 		/* copy scale out */
-		memcpy((struct gyro_calibration_s *) arg, &_parent->_gyro_scale, sizeof(_parent->_gyro_scale));
+		memcpy((struct accel_calibration_s *) arg, &_parent->_accel_scale, sizeof(_parent->_accel_scale));
 		return OK;
 
-	case GYROIOCSRANGE:
-		/* XXX not implemented */
-		// XXX change these two values on set:
-		// _gyro_range_scale = xx
-		// _gyro_range_rad_s = xx
-		return -EINVAL;
+	case ACCELIOCSRANGE:
+		return _parent->set_accel_range(arg);
 
-	case GYROIOCGRANGE:
-		return (unsigned long)(_parent->_gyro_range_rad_s * 180.0f / M_PI_F + 0.5f);
+	case ACCELIOCGRANGE:
+		return (unsigned long)((_parent->_accel_range_m_s2) / CONSTANTS_ONE_G + 0.5f);
 
 	default:
 		return CDev::ioctl(filp, cmd, arg);
