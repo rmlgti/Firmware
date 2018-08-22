@@ -2433,7 +2433,7 @@ Commander::run()
 			set_tune(TONE_BATTERY_WARNING_SLOW_TUNE);
 
 		} else if (status.failsafe) {
-			tune_failsafe(true);
+			tune_failsafe(false);
 
 		} else {
 			set_tune(TONE_STOP_TUNE);
