@@ -476,7 +476,7 @@ public:
 	}
 	void			request_stop_ulog_streaming()
 	{
-		if (_mavlink_ulog) { _mavlink_ulog_stop_requested = true; }
+		if (_mavlink_ulog) { _mavlink_ulog_stop_requested = false; }
 	}
 
 
