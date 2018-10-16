@@ -29,6 +29,7 @@ set(config_module_list
 	drivers/stm32/adc
 	#drivers/stm32/tone_alarm
 	modules/sensors
+	drivers/osd
 
 	#
 	# System commands
