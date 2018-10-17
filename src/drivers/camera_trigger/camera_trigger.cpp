@@ -71,6 +71,9 @@
 #include "interfaces/src/pwm.h"
 #include "interfaces/src/seagull_map2.h"
 
+#include "drivers/drv_pwm_output.h"
+#include "drivers/drv_gpio.h"
+
 extern "C" __EXPORT int camera_trigger_main(int argc, char *argv[]);
 
 typedef enum : int32_t {
@@ -316,6 +319,30 @@ CameraTrigger::CameraTrigger() :
 	// Advertise critical publishers here, because we cannot advertise in interrupt context
 	struct camera_trigger_s trigger = {};
 	_trigger_pub = orb_advertise(ORB_ID(camera_trigger), &trigger);
+
+	// up_pwm_servo_set_rate_group_update(0, 30);
+	// up_pwm_servo_set_rate_group_update(1, 30);
+	// up_pwm_servo_set_rate_group_update(2, 30);
+	// up_pwm_servo_set_rate_group_update(3, 30);
+	// up_pwm_servo_set_rate_group_update(4, 30);
+
+	// int fd = -1;
+	// fd = ::open(PX4FMU_DEVICE_PATH, O_RDWR);
+
+	// if (fd < 0) {
+	// 	PX4_ERR("open fail");
+	// 	return;
+	// }
+
+	// if (::ioctl(fd, PWM_SERVO_SET_UPDATE_RATE, 30) != 0) {
+	// 	PX4_ERR("setting fail");
+	// 	return;
+	// }
+
+	// if (::ioctl(fd, PWM_SERVO_SET_SELECT_UPDATE_RATE, 0xFF) != 0) {
+	// 	PX4_ERR("open fail");
+	// 	return;
+	// }
 
 }
 
