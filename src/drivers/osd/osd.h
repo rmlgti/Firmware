@@ -68,12 +68,13 @@
 #include <drivers/drv_hrt.h>
 
 #include <uORB/uORB.h>
-#include <uORB/topics/subsystem_info.h>
+#include <uORB/topics/battery_status.h>
 
 #include <board_config.h>
 
 // unused so far
 #include <drivers/device/ringbuffer.h>
+#include <uORB/topics/subsystem_info.h>
 #include <uORB/topics/optical_flow.h>
 #include <uORB/topics/distance_sensor.h>
 #include <uORB/topics/sensor_gyro.h>
@@ -103,6 +104,8 @@
 
 #define OSD_US 1000 /*   1 ms */
 #define OSD_SAMPLE_RATE 10000 /*  10 ms */
+
+#define OSD_CHARS_PER_ROW	30
 
 /* OSD Registers addresses */
 
@@ -134,24 +137,20 @@ protected:
 
 private:
 	work_s _work;
-	ringbuffer::RingBuffer *_reports;
+
 	bool _sensor_ok;
 	int _measure_ticks;
-	int _class_instance;
-	int _orb_class_instance;
-
-	orb_advert_t _optical_flow_pub;
-	orb_advert_t _subsystem_pub;
 
 	perf_counter_t _sample_perf;
 	perf_counter_t _comms_errors;
 
-	uint64_t _previous_collect_timestamp;
+	int _battery_sub;
 
-	int _flow_sum_x = 0;
-	int _flow_sum_y = 0;
-	uint64_t _flow_dt_sum_usec = 0;
 	bool _on;
+
+	// battery
+	float _battery_voltage_filtered_v;
+	float _battery_discharge_mah;
 
 
 	/**
@@ -172,13 +171,12 @@ private:
 	* and start a new one.
 	*/
 	void cycle();
-	int	collect();
+
+	int update_topics();
+	int	update_screen();
 
 	int readRegister(unsigned reg, uint8_t *data, unsigned count);
 	int writeRegister(unsigned reg, uint8_t data);
-
-	// int sensorInit();
-	// int readMotionCount(int16_t &deltaX, int16_t &deltaY);
 
 	/**
 	* Static trampoline from the workq context; because we don't have a

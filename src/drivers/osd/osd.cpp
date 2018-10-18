@@ -43,17 +43,14 @@
 
 OSD::OSD(int bus, int dev) :
 	SPI("OSD", OSD_DEVICE_PATH, bus, dev, SPIDEV_MODE0, OSD_SPI_BUS_SPEED),
-	_reports(nullptr),
 	_sensor_ok(false),
 	_measure_ticks(0),
-	_class_instance(-1),
-	_orb_class_instance(-1),
-	_optical_flow_pub(nullptr),
-	_subsystem_pub(nullptr),
 	_sample_perf(perf_alloc(PC_ELAPSED, "osd_read")),
 	_comms_errors(perf_alloc(PC_COUNT, "osd_com_err")),
-	_previous_collect_timestamp(0),
-	_on(false)
+	_battery_sub(-1),
+	_on(false),
+	_battery_voltage_filtered_v(0),
+	_battery_discharge_mah(0)
 {
 
 	// enable debug() calls
@@ -68,11 +65,6 @@ OSD::~OSD()
 	/* make sure we are truly inactive */
 	stop();
 
-	/* free any existing reports */
-	if (_reports != nullptr) {
-		delete _reports;
-	}
-
 	// free perf counters
 	perf_free(_sample_perf);
 	perf_free(_comms_errors);
@@ -82,29 +74,16 @@ OSD::~OSD()
 int
 OSD::init()
 {
-	int ret = PX4_ERROR;
-
-	/* For devices competing with NuttX SPI drivers on a bus (Crazyflie SD Card expansion board) */
-	// SPI::set_lockmode(LOCK_THREADS);
-
 	/* do SPI init (and probe) first */
 	if (SPI::init() != OK) {
-		goto out;
+		return PX4_ERROR;
 	}
 
-	/* allocate basic report buffers */
-	_reports = new ringbuffer::RingBuffer(2, sizeof(optical_flow_s));
+	_battery_sub = orb_subscribe(ORB_ID(battery_status));
 
-	if (_reports == nullptr) {
-		goto out;
-	}
-
-	ret = OK;
 	_sensor_ok = true;
-	_previous_collect_timestamp = hrt_absolute_time();
 
-out:
-	return ret;
+	return PX4_OK;
 
 }
 
@@ -141,30 +120,48 @@ OSD::probe()
 
 
 	usleep(1000);
+	x *= 1;
 
 	ret &= writeRegister(0x04, 0); //DMM set to 0
 
-	x = 10;
+	x = OSD_CHARS_PER_ROW + 1;
 
 	ret &= writeRegister(0x05, 0x00); //DMAH
 
 	ret &= writeRegister(0x06, x); //DMAL
-	// ret &= writeRegister(0x07,0x48);
-	ret &= writeRegister(0x09, 0x0B);
+	ret &= writeRegister(0x07, 146);
 
-	ret &= writeRegister(0x06, x + 1); //DMAL
-	// ret &= writeRegister(0x07,0x45);
-	ret &= writeRegister(0x09, 0x4C);
+	// ret &= writeRegister(0x06, x + 1); //DMAL
+	// ret &= writeRegister(0x07, 'A');
 
-	ret &= writeRegister(0x06, x + 2); //DMAL
-	// ret &= writeRegister(0x07,0x4C);
-	ret &= writeRegister(0x09, 0xF9);
+	// ret &= writeRegister(0x06, x + 2); //DMAL
+	// ret &= writeRegister(0x07, 'T');
 
-	// ret &= writeRegister(0x06,x+3);//DMAL
-	// ret &= writeRegister(0x07,0x4C);
+	// x = (OSD_CHARS_PER_ROW * 2) + 1;
 
-	// ret &= writeRegister(0x06,x+4);//DMAL
-	// ret &= writeRegister(0x07,0x4F);
+	// ret &= writeRegister(0x06, x); //DMAL
+	// ret &= writeRegister(0x07, 'C');
+
+	// ret &= writeRegister(0x06, x + 1); //DMAL
+	// ret &= writeRegister(0x07, 'U');
+
+	// ret &= writeRegister(0x06, x + 2); //DMAL
+	// ret &= writeRegister(0x07, 'R');
+
+	// for(uint8_t i = 0; i< 255; i++){
+	// 	int z = 30 + i;
+	// 	if(z > 255){
+	// 		ret &= writeRegister(0x05, 1); //DMAL
+	// 		ret &= writeRegister(0x06, 30 + i - 255); //DMAL
+	// 	} else {
+	// 		ret &= writeRegister(0x06, 30 + i); //DMAL
+	// 	}
+
+	// 	ret &= writeRegister(0x07, i);
+	// }
+
+	// ret &= writeRegister(0x06, 30); //DMAL
+	// ret &= writeRegister(0x07, 255);
 
 	ret &= writeRegister(0x00, 0x08); //enable video output
 
@@ -345,57 +342,85 @@ OSD::writeRegister(unsigned reg, uint8_t data)
 
 
 int
-OSD::collect()
+OSD::update_topics()
 {
-	int ret = PX4_ERROR;
+	struct battery_status_s battery = {};
+	bool updated = false;
 
-	if (_on) {
-		ret &= writeRegister(0x00, 0x00); //disable video output
-		_on = false;
+	/* update battery subscriptions */
+	orb_check(_battery_sub, &updated);
 
-	} else {
-		ret &= writeRegister(0x00, 0x08); //enable video output
-		_on = true;
+	if (updated) {
+		orb_copy(ORB_ID(battery_status), _battery_sub, &battery);
+
+		// if (battery.connected) {
+		_battery_voltage_filtered_v = battery.voltage_filtered_v;
+		_battery_discharge_mah = battery.discharged_mah;
+		// }
 	}
+
+
+	return PX4_OK;
+}
+
+
+int
+OSD::update_screen()
+{
+
+	// if (_on) {
+	// 	ret &= writeRegister(0x00, 0x00); //disable video output
+	// 	_on = false;
+
+	// } else {
+	// 	ret &= writeRegister(0x00, 0x08); //enable video output
+	// 	_on = true;
+	// }
+
+	int ret = 0;
+
+	char buf[5];
+	sprintf(buf, "%4.2f", (double)_battery_voltage_filtered_v);
+
+	ret &= writeRegister(0x04, 0); //DMM set to 0
+
+	uint8_t x = OSD_CHARS_PER_ROW + 2;
+
+	ret &= writeRegister(0x05, 0x00); //DMAH
+
+	for (int i = 0; i < 5; i++) {
+		ret &= writeRegister(0x06, x + i); //DMAL
+		ret &= writeRegister(0x07, buf[i]);
+	}
+
+	ret &= writeRegister(0x06, x + 4); //DMAL
+	ret &= writeRegister(0x07, 'V');
+
+	sprintf(buf, "%d", (int)_battery_discharge_mah);
+
+	x = (OSD_CHARS_PER_ROW * 2) + 1;
+
+	for (int i = 0; i < 5; i++) {
+		ret &= writeRegister(0x06, x + i); //DMAL
+		ret &= writeRegister(0x07, buf[i]);
+	}
+
+	ret &= writeRegister(0x06, x + 4); //DMAL
+	ret &= writeRegister(0x07, 7);
+
+	ret &= writeRegister(0x00, 0x08); //enable video output
+
+	ret *= 1;
+
 
 	return PX4_OK;
 
 }
 
 
-// int
-// PMW3901::readMotionCount(int16_t &deltaX, int16_t &deltaY)
-// {
-// 	int ret;
-
-// 	uint8_t data[10] = { DIR_READ(0x02), 0, DIR_READ(0x03), 0, DIR_READ(0x04), 0,
-// 			     DIR_READ(0x05), 0, DIR_READ(0x06), 0
-// 			   };
-
-// 	ret = transfer(&data[0], &data[0], 10);
-
-// 	if (OK != ret) {
-// 		perf_count(_comms_errors);
-// 		DEVICE_LOG("spi::transfer returned %d", ret);
-// 		return ret;
-// 	}
-
-// 	deltaX = ((int16_t)data[5] << 8) | data[3];
-// 	deltaY = ((int16_t)data[9] << 8) | data[7];
-
-// 	ret = OK;
-
-// 	return ret;
-
-// }
-
-
 void
 OSD::start()
 {
-	/* reset the report ring and state machine */
-	_reports->flush();
-
 	/* schedule a cycle to start things */
 	work_queue(LPWORK, &_work, (worker_t)&OSD::cycle_trampoline, this, USEC2TICK(OSD_US));
 }
@@ -417,7 +442,7 @@ OSD::cycle_trampoline(void *arg)
 void
 OSD::cycle()
 {
-	collect();
+	update_screen();
 
 	/* schedule a fresh cycle call when the measurement is done */
 	work_queue(LPWORK,
@@ -434,7 +459,7 @@ OSD::print_info()
 	perf_print_counter(_sample_perf);
 	perf_print_counter(_comms_errors);
 	printf("poll interval:  %u ticks\n", _measure_ticks);
-	_reports->print_info("report queue");
+	printf("battery_status: %.3f\n", (double)_battery_voltage_filtered_v);
 }
 
 
