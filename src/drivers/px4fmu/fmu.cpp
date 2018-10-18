@@ -64,8 +64,6 @@
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/safety.h>
 
-#include <drivers/drv_pwm_trigger.h>
-
 #define SCHEDULE_INTERVAL	2000	/**< The schedule interval in usec (500 Hz) */
 
 static constexpr uint8_t CYCLE_COUNT = 10; /* safety switch must be held for 1 second to activate */
@@ -312,7 +310,7 @@ PX4FMU::PX4FMU(bool run_as_task) :
 	_mode(MODE_NONE),
 	_pwm_default_rate(50),
 	_pwm_alt_rate(50),
-	_pwm_alt_rate_channels(21),
+	_pwm_alt_rate_channels(0),
 	_current_update_rate(0),
 	_run_as_task(run_as_task),
 	_armed_sub(-1),
@@ -624,7 +622,7 @@ PX4FMU::set_mode(Mode mode)
 
 		/* default output rates */
 		_pwm_default_rate = 400;
-		_pwm_alt_rate = 50;
+		_pwm_alt_rate = 30;
 		_pwm_alt_rate_channels = 0;
 		_pwm_mask = 0x30;
 		_pwm_initialized = false;
@@ -651,9 +649,6 @@ PX4FMU::set_mode(Mode mode)
 		_pwm_mask = 0x1f;
 		_pwm_initialized = false;
 		_num_outputs = 4;
-
-		up_pwm_trigger_set(1, 100);
-		up_pwm_trigger_set(4, 100);
 
 		break;
 

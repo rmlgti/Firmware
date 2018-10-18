@@ -339,6 +339,10 @@ CameraTrigger::CameraTrigger() :
 	// 	return;
 	// }
 
+	// uint32_t group_mask;
+
+	// ::ioctl(fd, PWM_SERVO_GET_RATEGROUP(1), (unsigned long)&group_mask);
+
 	// if (::ioctl(fd, PWM_SERVO_SET_SELECT_UPDATE_RATE, 0xFF) != 0) {
 	// 	PX4_ERR("open fail");
 	// 	return;
