@@ -171,7 +171,7 @@
 #define PX4_SPIDEV_ICM_20602        1
 #define PX4_SPIDEV_BARO_BUS         3
 #define PX4_SPIDEV_BARO             1
-#define PX4_SPIDEV_OSD              PX4_MK_SPI_SEL(PX4_SPI_BUS_OSD,0)
+#define PX4_SPIDEV_OSD              2
 
 /* USB OTG FS
  *
