@@ -1799,7 +1799,7 @@ private:
 
 protected:
 	explicit MavlinkStreamCameraTrigger(Mavlink *mavlink) : MavlinkStream(mavlink),
-		_trigger_sub(_mavlink->add_orb_subscription(ORB_ID(camera_trigger))),
+		_trigger_sub(_mavlink->add_orb_subscription(ORB_ID(camera_trigger_feedback))),
 		_trigger_time(0)
 	{}
 

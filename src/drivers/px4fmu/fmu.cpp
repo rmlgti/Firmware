@@ -621,8 +621,8 @@ PX4FMU::set_mode(Mode mode)
 		PX4_DEBUG("MODE_4PWM");
 
 		/* default output rates */
-		_pwm_default_rate = 50;
-		_pwm_alt_rate = 50;
+		_pwm_default_rate = 400;
+		_pwm_alt_rate = 30;
 		_pwm_alt_rate_channels = 0;
 		_pwm_mask = 0xf;
 		_pwm_initialized = false;
@@ -643,10 +643,10 @@ PX4FMU::set_mode(Mode mode)
 		PX4_DEBUG("MODE_5PWM");
 
 		/* default output rates */
-		_pwm_default_rate = 50;
-		_pwm_alt_rate = 50;
-		_pwm_alt_rate_channels = 0;
-		_pwm_mask = 0x1f;
+		_pwm_default_rate = 30;
+		_pwm_alt_rate = 400;
+		_pwm_alt_rate_channels = 15;
+		_pwm_mask = 0xf;
 		_pwm_initialized = false;
 		_num_outputs = 4;
 
