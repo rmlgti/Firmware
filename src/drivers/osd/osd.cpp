@@ -41,16 +41,18 @@
 #include "osd.h"
 
 
-OSD::OSD(int bus, int dev) :
-	SPI("OSD", OSD_DEVICE_PATH, bus, dev, SPIDEV_MODE0, OSD_SPI_BUS_SPEED),
-	_sensor_ok(false),
+OSD::OSD(int bus) :
+	SPI("OSD", OSD_DEVICE_PATH, bus, OSD_SPIDEV, SPIDEV_MODE0, OSD_SPI_BUS_SPEED),
 	_measure_ticks(0),
 	_sample_perf(perf_alloc(PC_ELAPSED, "osd_read")),
 	_comms_errors(perf_alloc(PC_COUNT, "osd_com_err")),
 	_battery_sub(-1),
-	_on(false),
+	_local_position_sub(-1),
 	_battery_voltage_filtered_v(0),
-	_battery_discharge_mah(0)
+	_battery_discharge_mah(0),
+	_battery_valid(false),
+	_local_position_z(0),
+	_local_position_valid(false)
 {
 
 	// enable debug() calls
@@ -76,14 +78,28 @@ OSD::init()
 {
 	/* do SPI init (and probe) first */
 	if (SPI::init() != OK) {
-		return PX4_ERROR;
+		goto fail;
+	}
+
+	if (reset() != PX4_OK) {
+		goto fail;
+	}
+
+	if (writeRegister(0x00, 0x48) != PX4_OK) { //DMM set to 0
+		goto fail;
+	}
+
+	if (writeRegister(0x04, 0) != PX4_OK) { //DMM set to 0
+		goto fail;
 	}
 
 	_battery_sub = orb_subscribe(ORB_ID(battery_status));
-
-	_sensor_ok = true;
+	_local_position_sub = orb_subscribe(ORB_ID(vehicle_local_position));
 
 	return PX4_OK;
+
+fail:
+	return PX4_ERROR;
 
 }
 
@@ -91,208 +107,32 @@ OSD::init()
 int
 OSD::probe()
 {
-	uint8_t data[2] = { 0, 0 };
+	uint8_t data = 0;
+	int ret = PX4_OK;
 
-	int ret = OK;
+	ret |= writeRegister(0x00, 0x01); //disable video output
 
-	// readRegister(0x00, &data[0], 1); // chip id
+	// ret |= readRegister(0xEC, &data[0], 1);
+	ret |= readRegister(0x00, &data, 1);
 
-	// // Test the SPI communication, checking chipId and inverse chipId
-	// if (data[0] == 0x49) {
-	// 	return OK;
-	// }
-
-	ret &= writeRegister(0x00, 0x00); //disable video output
-
-	usleep(1000);
-
-	ret = readRegister(0xEC, &data[0], 1);
-	usleep(1000);
-	uint8_t x = data[0] & 0xEF;
-	// ret &= writeRegister(0x6C, x);
-	// usleep(1000);
-	printf("probe read: %u\n", data[0]);
-
-	// for(uint8_t i = 0; i<10; i++){
-	// 	ret = readRegister(i, &data[0], 1);
-	// 	printf("probe read[%u]: %u\n", (unsigned)i, data[0]);
-	// }
-
-
-	usleep(1000);
-	x *= 1;
-
-	ret &= writeRegister(0x04, 0); //DMM set to 0
-
-	x = OSD_CHARS_PER_ROW + 1;
-
-	ret &= writeRegister(0x05, 0x00); //DMAH
-
-	ret &= writeRegister(0x06, x); //DMAL
-	ret &= writeRegister(0x07, 146);
-
-	// ret &= writeRegister(0x06, x + 1); //DMAL
-	// ret &= writeRegister(0x07, 'A');
-
-	// ret &= writeRegister(0x06, x + 2); //DMAL
-	// ret &= writeRegister(0x07, 'T');
-
-	// x = (OSD_CHARS_PER_ROW * 2) + 1;
-
-	// ret &= writeRegister(0x06, x); //DMAL
-	// ret &= writeRegister(0x07, 'C');
-
-	// ret &= writeRegister(0x06, x + 1); //DMAL
-	// ret &= writeRegister(0x07, 'U');
-
-	// ret &= writeRegister(0x06, x + 2); //DMAL
-	// ret &= writeRegister(0x07, 'R');
-
-	// for(uint8_t i = 0; i< 255; i++){
-	// 	int z = 30 + i;
-	// 	if(z > 255){
-	// 		ret &= writeRegister(0x05, 1); //DMAL
-	// 		ret &= writeRegister(0x06, 30 + i - 255); //DMAL
-	// 	} else {
-	// 		ret &= writeRegister(0x06, 30 + i); //DMAL
-	// 	}
-
-	// 	ret &= writeRegister(0x07, i);
-	// }
-
-	// ret &= writeRegister(0x06, 30); //DMAL
-	// ret &= writeRegister(0x07, 255);
-
-	ret &= writeRegister(0x00, 0x08); //enable video output
-
-	if (ret != OK) {
+	if (data != 1 || ret != PX4_OK) {
 		printf("probe error\n");
-		return PX4_ERROR;
 	}
 
-	_on = true;
-
-	// not found on any address
-	// return -EIO;
-	return PX4_OK;
+	return ret;
 }
 
 
 int
 OSD::ioctl(device::file_t *filp, int cmd, unsigned long arg)
 {
-	switch (cmd) {
-
-	case SENSORIOCSPOLLRATE: {
-			switch (arg) {
-
-			case 0:
-				return -EINVAL;
-
-			case SENSOR_POLLRATE_DEFAULT: {
-
-					/* do we need to start internal polling? */
-					bool want_start = (_measure_ticks == 0);
-
-					/* set interval for next measurement to minimum legal value */
-					_measure_ticks = USEC2TICK(OSD_SAMPLE_RATE);
-
-					/* if we need to start the poll state machine, do it */
-					if (want_start) {
-						start();
-					}
-
-					return OK;
-				}
-
-			case SENSOR_POLLRATE_MANUAL: {
-
-					stop();
-					_measure_ticks = 0;
-					return OK;
-				}
-
-			/* adjust to a legal polling interval in Hz */
-			default: {
-					/* do we need to start internal polling? */
-					bool want_start = (_measure_ticks == 0);
-
-					/* convert hz to tick interval via microseconds */
-					unsigned ticks = USEC2TICK(1000000 / arg);
-
-					/* check against maximum rate */
-					if (ticks < USEC2TICK(OSD_SAMPLE_RATE)) {
-						return -EINVAL;
-					}
-
-					/* update interval for next measurement */
-					_measure_ticks = ticks;
-
-					/* if we need to start the poll state machine, do it */
-					if (want_start) {
-						start();
-					}
-
-					return OK;
-				}
-			}
-		}
-
-	default:
-		/* give it to the superclass */
-		return SPI::ioctl(filp, cmd, arg);
-	}
+	return -1;
 }
 
 ssize_t
 OSD::read(device::file_t *filp, char *buffer, size_t buflen)
 {
-	// unsigned count = buflen / sizeof(struct optical_flow_s);
-	// struct optical_flow_s *rbuf = reinterpret_cast<struct optical_flow_s *>(buffer);
-	int ret = 0;
-
-	// /* buffer must be large enough */
-	// if (count < 1) {
-	// 	return -ENOSPC;
-	// }
-
-	// /* if automatic measurement is enabled */
-	// if (_measure_ticks > 0) {
-
-	// 	/*
-	// 	 * While there is space in the caller's buffer, and reports, copy them.
-	// 	 * Note that we may be pre-empted by the workq thread while we are doing this;
-	// 	 * we are careful to avoid racing with them.
-	// 	 */
-	// 	while (count--) {
-	// 		if (_reports->get(rbuf)) {
-	// 			ret += sizeof(*rbuf);
-	// 			rbuf++;
-	// 		}
-	// 	}
-
-	// 	/* if there was no data, warn the caller */
-	// 	return ret ? ret : -EAGAIN;
-	// }
-
-	// /* manual measurement - run one conversion */
-	// do {
-	// 	_reports->flush();
-
-	// 	/* trigger a measurement */
-	// 	if (OK != collect()) {
-	// 		ret = -EIO;
-	// 		break;
-	// 	}
-
-	// 	/* state machine will have generated a report, copy it out */
-	// 	if (_reports->get(rbuf)) {
-	// 		ret = sizeof(*rbuf);
-	// 	}
-
-	// } while (0);
-
-	return ret;
+	return -1;
 }
 
 
@@ -340,11 +180,107 @@ OSD::writeRegister(unsigned reg, uint8_t data)
 
 }
 
+int
+OSD::add_character_to_screen(char c, uint8_t pos_x, uint8_t pos_y)
+{
+
+	uint16_t position = (OSD_CHARS_PER_ROW * pos_y) + pos_x;
+	uint8_t position_lsb;
+	int ret = PX4_OK;
+
+	if (position > 0xFF) {
+		position_lsb = static_cast<uint8_t>(position) - 0xFF;
+		ret |= writeRegister(0x05, 0x01); //DMAH
+
+	} else {
+		position_lsb = static_cast<uint8_t>(position);
+		ret |= writeRegister(0x05, 0x00); //DMAH
+	}
+
+	ret |= writeRegister(0x06, position_lsb); //DMAL
+	ret |= writeRegister(0x07, c);
+
+	return ret;
+}
 
 int
-OSD::update_topics()
+OSD::add_battery_symbol(uint8_t pos_x, uint8_t pos_y)
+{
+	return add_character_to_screen(146, pos_x, pos_y);
+}
+
+int
+OSD::add_battery_info(uint8_t pos_x, uint8_t pos_y)
+{
+
+	char buf[5];
+	int ret = PX4_OK;
+
+	sprintf(buf, "%4.2f", (double)_battery_voltage_filtered_v);
+
+	for (int i = 0; i < 5; i++) {
+		ret |= add_character_to_screen(buf[i], pos_x + i, pos_y);
+	}
+
+	ret |= add_character_to_screen('V', pos_x + 5, pos_y);
+
+	pos_y++;
+
+	sprintf(buf, "%4d", (int)_battery_discharge_mah);
+
+	for (int i = 0; i < 5; i++) {
+		ret |= add_character_to_screen(buf[i], pos_x + i, pos_y);
+	}
+
+	ret |= add_character_to_screen(7, pos_x + 5, pos_y); // mAh symbol
+
+	return ret;
+}
+
+int
+OSD::add_altitude_symbol(uint8_t pos_x, uint8_t pos_y)
+{
+	// return add_character_to_screen(xxx, pos_x, pos_y);
+	return PX4_OK;
+}
+
+int
+OSD::add_altitude(uint8_t pos_x, uint8_t pos_y)
+{
+
+	return PX4_OK;
+}
+
+int
+OSD::enable_screen()
+{
+	uint8_t data;
+	int ret = PX4_OK;
+
+	ret |= readRegister(0x00, &data, 1);
+	ret |= writeRegister(0x00, data | 0x48);
+
+	return ret;
+}
+
+int
+OSD::disable_screen()
+{
+	uint8_t data;
+	int ret = PX4_OK;
+
+	ret |= readRegister(0x00, &data, 1);
+	ret |= writeRegister(0x00, data & 0xF7);
+
+	return ret;
+}
+
+
+int
+OSD::update_topics()//TODO have an argument to choose what to update and return validity
 {
 	struct battery_status_s battery = {};
+	struct vehicle_local_position_s local_position = {};
 	bool updated = false;
 
 	/* update battery subscriptions */
@@ -353,12 +289,28 @@ OSD::update_topics()
 	if (updated) {
 		orb_copy(ORB_ID(battery_status), _battery_sub, &battery);
 
-		// if (battery.connected) {
-		_battery_voltage_filtered_v = battery.voltage_filtered_v;
-		_battery_discharge_mah = battery.discharged_mah;
-		// }
+		if (battery.connected) {
+			_battery_voltage_filtered_v = battery.voltage_filtered_v;
+			_battery_discharge_mah = battery.discharged_mah;
+			_battery_valid = true;
+
+		} else {
+			_battery_valid = false;
+		}
 	}
 
+	/* update vehicle local position subscriptions */
+	orb_check(_local_position_sub, &updated);
+
+	if (updated) {
+		if (local_position.z_valid) {
+			_local_position_z = -local_position.z;
+			_local_position_valid = true;
+
+		} else {
+			_local_position_valid = false;
+		}
+	}
 
 	return PX4_OK;
 }
@@ -367,53 +319,21 @@ OSD::update_topics()
 int
 OSD::update_screen()
 {
+	int ret = PX4_OK;
 
-	// if (_on) {
-	// 	ret &= writeRegister(0x00, 0x00); //disable video output
-	// 	_on = false;
+	if (_battery_valid) {
+		ret |= add_battery_symbol(1, 1);
+		ret |= add_battery_info(2, 1);
+	}
 
-	// } else {
-	// 	ret &= writeRegister(0x00, 0x08); //enable video output
-	// 	_on = true;
+	// if(_local_position_valid){
+	// 	ret |= add_altitude_symbol(1, 2);
+	// 	ret |= add_altitude(2, 2);
 	// }
 
-	int ret = 0;
+	// enable_screen();
 
-	char buf[5];
-	sprintf(buf, "%4.2f", (double)_battery_voltage_filtered_v);
-
-	ret &= writeRegister(0x04, 0); //DMM set to 0
-
-	uint8_t x = OSD_CHARS_PER_ROW + 2;
-
-	ret &= writeRegister(0x05, 0x00); //DMAH
-
-	for (int i = 0; i < 5; i++) {
-		ret &= writeRegister(0x06, x + i); //DMAL
-		ret &= writeRegister(0x07, buf[i]);
-	}
-
-	ret &= writeRegister(0x06, x + 4); //DMAL
-	ret &= writeRegister(0x07, 'V');
-
-	sprintf(buf, "%d", (int)_battery_discharge_mah);
-
-	x = (OSD_CHARS_PER_ROW * 2) + 1;
-
-	for (int i = 0; i < 5; i++) {
-		ret &= writeRegister(0x06, x + i); //DMAL
-		ret &= writeRegister(0x07, buf[i]);
-	}
-
-	ret &= writeRegister(0x06, x + 4); //DMAL
-	ret &= writeRegister(0x07, 7);
-
-	ret &= writeRegister(0x00, 0x08); //enable video output
-
-	ret *= 1;
-
-
-	return PX4_OK;
+	return ret;
 
 }
 
@@ -431,6 +351,15 @@ OSD::stop()
 	work_cancel(LPWORK, &_work);
 }
 
+int
+OSD::reset()
+{
+	int ret = writeRegister(0x00, 0x02);
+	usleep(100);
+
+	return ret;
+}
+
 void
 OSD::cycle_trampoline(void *arg)
 {
@@ -442,14 +371,18 @@ OSD::cycle_trampoline(void *arg)
 void
 OSD::cycle()
 {
-	update_screen();
+	update_topics();
+
+	if (_battery_valid || _local_position_valid) {
+		update_screen();
+	}
 
 	/* schedule a fresh cycle call when the measurement is done */
 	work_queue(LPWORK,
 		   &_work,
 		   (worker_t)&OSD::cycle_trampoline,
 		   this,
-		   USEC2TICK(2000000));
+		   USEC2TICK(OSD_UPDATE_RATE));
 
 }
 
@@ -471,53 +404,45 @@ namespace osd
 
 OSD	*g_dev;
 
-void	start(int spi_bus, int spi_dev);
-void	stop();
-void	test();
-void	reset();
-void	info();
-void	usage();
+int	start(int spi_bus);
+int	stop();
+int	info();
+void usage();
 
 
 /**
  * Start the driver.
  */
-void
-start(int spi_bus, int spi_dev)
+int
+start(int spi_bus)
 {
 	int fd;
 
 	if (g_dev != nullptr) {
-		errx(1, "already started");
+		PX4_ERR("already started");
+		goto fail;
 	}
 
 	/* create the driver */
-	g_dev = new OSD(spi_bus, spi_dev);
+	g_dev = new OSD(spi_bus);
 
 	if (g_dev == nullptr) {
-		printf("1\n");
 		goto fail;
 	}
 
 	if (OK != g_dev->init()) {
-		printf("2\n");
 		goto fail;
 	}
 
-	/* set the poll rate to default, starts automatic data collection */
 	fd = open(OSD_DEVICE_PATH, O_RDONLY);
 
 	if (fd < 0) {
-		printf("3\n");
 		goto fail;
 	}
 
-	if (ioctl(fd, SENSORIOCSPOLLRATE, SENSOR_POLLRATE_DEFAULT) < 0) {
-		printf("4\n");
-		goto fail;
-	}
+	g_dev->start();
 
-	exit(0);
+	return PX4_OK;
 
 fail:
 
@@ -526,72 +451,43 @@ fail:
 		g_dev = nullptr;
 	}
 
-	errx(1, "driver start failed");
+	PX4_ERR("driver start failed");
+	return PX4_ERROR;
 }
 
 /**
  * Stop the driver
  */
-void stop()
+int
+stop()
 {
 	if (g_dev != nullptr) {
 		delete g_dev;
 		g_dev = nullptr;
 
 	} else {
-		errx(1, "driver not running");
+		PX4_ERR("driver not running");
+		return PX4_ERROR;
 	}
 
-	exit(0);
+	return PX4_OK;
 }
-
-
-/**
- * Perform some basic functional tests on the driver;
- * make sure we can collect data from the sensor in polled
- * and automatic modes.
- */
-void
-test()
-{
-
-	struct optical_flow_s report;
-	ssize_t sz;
-
-	int fd = open(OSD_DEVICE_PATH, O_RDONLY);
-
-	if (fd < 0) {
-		err(1, "%s open failed (try 'osd start' if the driver is not running)", OSD_DEVICE_PATH);
-	}
-
-	/* do a simple demand read */
-	sz = read(fd, &report, sizeof(report));
-
-	if (sz != sizeof(report)) {
-		PX4_ERR("ret: %d, expected: %d", sz, sizeof(report));
-		err(1, "immediate acc read failed");
-	}
-
-	print_message(report);
-
-	errx(0, "PASS");
-}
-
 
 /**
  * Print a little info about the driver.
  */
-void
+int
 info()
 {
 	if (g_dev == nullptr) {
-		errx(1, "driver not running");
+		PX4_ERR("driver not running");
+		return PX4_ERROR;
 	}
 
 	printf("state @ %p\n", g_dev);
 	g_dev->print_info();
 
-	exit(0);
+	return PX4_OK;
 }
 
 /**
@@ -599,7 +495,7 @@ info()
  */
 void usage()
 {
-	PX4_INFO("usage: osd {start|test|reset|info'}");
+	PX4_INFO("usage: osd {start|stop|status'}");
 	PX4_INFO("    [-b SPI_BUS]");
 }
 
@@ -621,16 +517,11 @@ osd_main(int argc, char *argv[])
 	int myoptind = 1;
 	const char *myoptarg = nullptr;
 	int spi_bus = OSD_BUS;
-	int spi_dev = OSD_SPIDEV;
 
-	while ((ch = px4_getopt(argc, argv, "bd:", &myoptind, &myoptarg)) != EOF) {
+	while ((ch = px4_getopt(argc, argv, "b:", &myoptind, &myoptarg)) != EOF) {
 		switch (ch) {
 		case 'b':
 			spi_bus = (uint8_t)atoi(myoptarg);
-			break;
-
-		case 'd':
-			spi_dev = (uint8_t)atoi(myoptarg);
 			break;
 
 		default:
@@ -648,28 +539,21 @@ osd_main(int argc, char *argv[])
 	 * Start/load the driver.
 	 */
 	if (!strcmp(argv[myoptind], "start")) {
-		osd::start(spi_bus, spi_dev);
+		return osd::start(spi_bus);
 	}
 
 	/*
 	 * Stop the driver
 	 */
 	if (!strcmp(argv[myoptind], "stop")) {
-		osd::stop();
-	}
-
-	/*
-	 * Test the driver/device.
-	 */
-	if (!strcmp(argv[myoptind], "test")) {
-		osd::test();
+		return osd::stop();
 	}
 
 	/*
 	 * Print driver information.
 	 */
 	if (!strcmp(argv[myoptind], "info") || !strcmp(argv[myoptind], "status")) {
-		osd::info();
+		return osd::info();
 	}
 
 	osd::usage();

@@ -40,71 +40,46 @@
  * Driver for the ATXXXX chip on the omnibus fcu connected via SPI.
  */
 
-#include <px4_config.h>
-#include <px4_defines.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+#include <perf/perf_counter.h>
+#include <parameters/param.h>
 #include <px4_getopt.h>
 #include <px4_workqueue.h>
 
-#include <drivers/device/spi.h>
-
-#include <sys/types.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <semaphore.h>
-#include <string.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <errno.h>
-#include <stdio.h>
-#include <math.h>
-#include <unistd.h>
-#include <float.h>
-
-#include <perf/perf_counter.h>
-#include <systemlib/err.h>
-#include <parameters/param.h>
-
+#include <board_config.h>
 #include <drivers/drv_hrt.h>
+#include <drivers/device/spi.h>
 
 #include <uORB/uORB.h>
 #include <uORB/topics/battery_status.h>
-
-#include <board_config.h>
-
-// unused so far
-#include <drivers/device/ringbuffer.h>
-#include <uORB/topics/subsystem_info.h>
-#include <uORB/topics/optical_flow.h>
-#include <uORB/topics/distance_sensor.h>
-#include <uORB/topics/sensor_gyro.h>
+#include <uORB/topics/vehicle_local_position.h>
 
 /* Configuration Constants */
 #ifdef PX4_SPI_BUS_OSD
 #define OSD_BUS PX4_SPI_BUS_OSD
 #else
-#define OSD_BUS 0
+#error "add the required spi bus from board_config.h here"
 #endif
 
 #ifdef PX4_SPIDEV_OSD
 #define OSD_SPIDEV PX4_SPIDEV_OSD
 #else
-#define OSD_SPIDEV 0
+#error "add the required spi bus from board_config.h here"
 #endif
 
-#define OSD_SPI_BUS_SPEED (2000000L) // 2MHz
-
-// #define DIR_WRITE(a) ((a) | (1 << 7))
-// #define DIR_READ(a) ((a) & 0x7f)
+#define OSD_SPI_BUS_SPEED (2000000L) /*  2 MHz  */
 
 #define DIR_READ(a) ((a) | (1 << 7))
 #define DIR_WRITE(a) ((a) & 0x7f)
 
 #define OSD_DEVICE_PATH "/dev/osd"
 
-#define OSD_US 1000 /*   1 ms */
-#define OSD_SAMPLE_RATE 10000 /*  10 ms */
-
+#define OSD_US 1000 /*  1 ms  */
+#define OSD_UPDATE_RATE 200000 /*  5 Hz  */
 #define OSD_CHARS_PER_ROW	30
 
 /* OSD Registers addresses */
@@ -117,7 +92,7 @@
 class OSD : public device::SPI
 {
 public:
-	OSD(int bus = OSD_BUS, int dev = OSD_SPIDEV);
+	OSD(int bus = OSD_BUS);
 
 	virtual ~OSD();
 
@@ -132,27 +107,6 @@ public:
 	*/
 	void print_info();
 
-protected:
-	virtual int probe();
-
-private:
-	work_s _work;
-
-	bool _sensor_ok;
-	int _measure_ticks;
-
-	perf_counter_t _sample_perf;
-	perf_counter_t _comms_errors;
-
-	int _battery_sub;
-
-	bool _on;
-
-	// battery
-	float _battery_voltage_filtered_v;
-	float _battery_discharge_mah;
-
-
 	/**
 	* Initialise the automatic measurement state machine and start it.
 	*
@@ -160,6 +114,31 @@ private:
 	*       to make it more aggressive about resetting the bus in case of errors.
 	*/
 	void start();
+
+protected:
+	virtual int probe();
+
+private:
+	work_s _work;
+
+	int _measure_ticks;
+
+	perf_counter_t _sample_perf;
+	perf_counter_t _comms_errors;
+
+	int _battery_sub;
+	int _local_position_sub;
+
+	bool _on;
+
+	// battery
+	float _battery_voltage_filtered_v;
+	float _battery_discharge_mah;
+	bool _battery_valid;
+
+	// altitude
+	float _local_position_z;
+	bool _local_position_valid;
 
 	/**
 	* Stop the automatic measurement state machine.
@@ -172,11 +151,22 @@ private:
 	*/
 	void cycle();
 
-	int update_topics();
-	int	update_screen();
+	int reset();
 
 	int readRegister(unsigned reg, uint8_t *data, unsigned count);
 	int writeRegister(unsigned reg, uint8_t data);
+
+	int add_character_to_screen(char c, uint8_t pos_x, uint8_t pos_y);
+	int add_battery_symbol(uint8_t pos_x, uint8_t pos_y);
+	int add_battery_info(uint8_t pos_x, uint8_t pos_y);
+	int add_altitude_symbol(uint8_t pos_x, uint8_t pos_y);
+	int add_altitude(uint8_t pos_x, uint8_t pos_y);
+
+	int enable_screen();
+	int disable_screen();
+
+	int update_topics();
+	int	update_screen();
 
 	/**
 	* Static trampoline from the workq context; because we don't have a
