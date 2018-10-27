@@ -57,6 +57,7 @@
 #include <uORB/uORB.h>
 #include <uORB/topics/battery_status.h>
 #include <uORB/topics/vehicle_local_position.h>
+#include <uORB/topics/vehicle_status.h>
 
 /* Configuration Constants */
 #ifdef PX4_SPI_BUS_OSD
@@ -79,8 +80,10 @@
 #define OSD_DEVICE_PATH "/dev/osd"
 
 #define OSD_US 1000 /*  1 ms  */
-#define OSD_UPDATE_RATE 200000 /*  5 Hz  */
+#define OSD_UPDATE_RATE 500000 /*  2 Hz  */
 #define OSD_CHARS_PER_ROW	30
+#define OSD_ZERO_BYTE 0x00
+#define OSD_PAL_TX_MODE 0x40
 
 /* OSD Registers addresses */
 
@@ -126,8 +129,12 @@ private:
 	perf_counter_t _sample_perf;
 	perf_counter_t _comms_errors;
 
+	param_t _p_tx_mode;
+	int32_t _tx_mode;
+
 	int _battery_sub;
 	int _local_position_sub;
+	int _vehicle_status_sub;
 
 	bool _on;
 
@@ -139,6 +146,10 @@ private:
 	// altitude
 	float _local_position_z;
 	bool _local_position_valid;
+
+	// flight time
+	uint8_t _arming_state;
+	uint64_t _arming_timestamp;
 
 	/**
 	* Stop the automatic measurement state machine.
@@ -153,6 +164,8 @@ private:
 
 	int reset();
 
+	int init_osd();
+
 	int readRegister(unsigned reg, uint8_t *data, unsigned count);
 	int writeRegister(unsigned reg, uint8_t data);
 
@@ -161,6 +174,8 @@ private:
 	int add_battery_info(uint8_t pos_x, uint8_t pos_y);
 	int add_altitude_symbol(uint8_t pos_x, uint8_t pos_y);
 	int add_altitude(uint8_t pos_x, uint8_t pos_y);
+	int add_flighttime_symbol(uint8_t pos_x, uint8_t pos_y);
+	int add_flighttime(float flight_time, uint8_t pos_x, uint8_t pos_y);
 
 	int enable_screen();
 	int disable_screen();

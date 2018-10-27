@@ -46,17 +46,24 @@ OSD::OSD(int bus) :
 	_measure_ticks(0),
 	_sample_perf(perf_alloc(PC_ELAPSED, "osd_read")),
 	_comms_errors(perf_alloc(PC_COUNT, "osd_com_err")),
+	_tx_mode(1),
 	_battery_sub(-1),
 	_local_position_sub(-1),
+	_vehicle_status_sub(-1),
 	_battery_voltage_filtered_v(0),
 	_battery_discharge_mah(0),
 	_battery_valid(false),
 	_local_position_z(0),
-	_local_position_valid(false)
+	_local_position_valid(false),
+	_arming_state(0),
+	_arming_timestamp(0)
 {
-
 	// enable debug() calls
 	_debug_enabled = false;
+
+	// get params
+	_p_tx_mode = param_find("OSD_TX_MODE");
+	param_get(_p_tx_mode, (int32_t *)&_tx_mode);
 
 	// work_cancel in the dtor will explode if we don't do this...
 	memset(&_work, 0, sizeof(_work));
@@ -77,7 +84,7 @@ int
 OSD::init()
 {
 	/* do SPI init (and probe) first */
-	if (SPI::init() != OK) {
+	if (SPI::init() != PX4_OK) {
 		goto fail;
 	}
 
@@ -85,16 +92,13 @@ OSD::init()
 		goto fail;
 	}
 
-	if (writeRegister(0x00, 0x48) != PX4_OK) { //DMM set to 0
-		goto fail;
-	}
-
-	if (writeRegister(0x04, 0) != PX4_OK) { //DMM set to 0
+	if (init_osd() != PX4_OK) {
 		goto fail;
 	}
 
 	_battery_sub = orb_subscribe(ORB_ID(battery_status));
 	_local_position_sub = orb_subscribe(ORB_ID(vehicle_local_position));
+	_vehicle_status_sub = orb_subscribe(ORB_ID(vehicle_status));
 
 	return PX4_OK;
 
@@ -111,8 +115,6 @@ OSD::probe()
 	int ret = PX4_OK;
 
 	ret |= writeRegister(0x00, 0x01); //disable video output
-
-	// ret |= readRegister(0xEC, &data[0], 1);
 	ret |= readRegister(0x00, &data, 1);
 
 	if (data != 1 || ret != PX4_OK) {
@@ -120,6 +122,29 @@ OSD::probe()
 	}
 
 	return ret;
+}
+
+int
+OSD::init_osd()
+{
+	int ret = PX4_OK;
+	uint8_t data = OSD_ZERO_BYTE;
+
+	if (_tx_mode) {
+		data |= OSD_PAL_TX_MODE;
+	}
+
+	ret |= writeRegister(0x00, data);
+	ret |= writeRegister(0x04, OSD_ZERO_BYTE);
+
+	enable_screen();
+
+	// writeRegister(0x00, 0x48) != PX4_OK) { //DMM set to 0
+	// 	goto fail;
+	// }
+
+	return ret;
+
 }
 
 
@@ -212,7 +237,6 @@ OSD::add_battery_symbol(uint8_t pos_x, uint8_t pos_y)
 int
 OSD::add_battery_info(uint8_t pos_x, uint8_t pos_y)
 {
-
 	char buf[5];
 	int ret = PX4_OK;
 
@@ -240,15 +264,45 @@ OSD::add_battery_info(uint8_t pos_x, uint8_t pos_y)
 int
 OSD::add_altitude_symbol(uint8_t pos_x, uint8_t pos_y)
 {
-	// return add_character_to_screen(xxx, pos_x, pos_y);
-	return PX4_OK;
+	return add_character_to_screen(154, pos_x, pos_y);
 }
 
 int
 OSD::add_altitude(uint8_t pos_x, uint8_t pos_y)
 {
+	char buf[5];
+	int ret = PX4_OK;
 
-	return PX4_OK;
+	sprintf(buf, "%4.2f", (double)_local_position_z);
+
+	for (int i = 0; i < 5; i++) {
+		ret |= add_character_to_screen(buf[i], pos_x + i, pos_y);
+	}
+
+	ret |= add_character_to_screen('m', pos_x + 5, pos_y);
+
+	return ret;
+}
+
+int
+OSD::add_flighttime_symbol(uint8_t pos_x, uint8_t pos_y)
+{
+	return add_character_to_screen(112, pos_x, pos_y);
+}
+
+int
+OSD::add_flighttime(float flight_time, uint8_t pos_x, uint8_t pos_y)
+{
+	char buf[6];
+	int ret = PX4_OK;
+
+	sprintf(buf, "%5.1f", (double)flight_time);
+
+	for (int i = 0; i < 6; i++) {
+		ret |= add_character_to_screen(buf[i], pos_x + i, pos_y);
+	}
+
+	return ret;
 }
 
 int
@@ -281,9 +335,11 @@ OSD::update_topics()//TODO have an argument to choose what to update and return 
 {
 	struct battery_status_s battery = {};
 	struct vehicle_local_position_s local_position = {};
+	struct vehicle_status_s vehicle_status = {};
+
 	bool updated = false;
 
-	/* update battery subscriptions */
+	/* update battery subscription */
 	orb_check(_battery_sub, &updated);
 
 	if (updated) {
@@ -299,7 +355,7 @@ OSD::update_topics()//TODO have an argument to choose what to update and return 
 		}
 	}
 
-	/* update vehicle local position subscriptions */
+	/* update vehicle local position subscription */
 	orb_check(_local_position_sub, &updated);
 
 	if (updated) {
@@ -310,6 +366,17 @@ OSD::update_topics()//TODO have an argument to choose what to update and return 
 		} else {
 			_local_position_valid = false;
 		}
+	}
+
+	/* update vehicle status subscription */
+	orb_check(_vehicle_status_sub, &updated);
+
+	if (updated) {
+		if (vehicle_status.arming_state > 0 && _arming_state == 0) {
+			_arming_timestamp = hrt_absolute_time();
+		}
+
+		_arming_state = vehicle_status.arming_state;
 	}
 
 	return PX4_OK;
@@ -326,10 +393,16 @@ OSD::update_screen()
 		ret |= add_battery_info(2, 1);
 	}
 
-	// if(_local_position_valid){
-	// 	ret |= add_altitude_symbol(1, 2);
-	// 	ret |= add_altitude(2, 2);
-	// }
+	if (_local_position_valid) {
+		ret |= add_altitude_symbol(1, 3);
+		ret |= add_altitude(2, 3);
+	}
+
+	if (_arming_state > 0) {
+		float flight_time_sec = static_cast<float>((hrt_absolute_time() - _arming_timestamp) / (1.0e6));
+		ret |= add_flighttime_symbol(1, 5);
+		ret |= add_flighttime(flight_time_sec, 2, 5);
+	}
 
 	// enable_screen();
 
@@ -373,7 +446,7 @@ OSD::cycle()
 {
 	update_topics();
 
-	if (_battery_valid || _local_position_valid) {
+	if (_battery_valid || _local_position_valid || _arming_state > 0) {
 		update_screen();
 	}
 
@@ -393,6 +466,8 @@ OSD::print_info()
 	perf_print_counter(_comms_errors);
 	printf("poll interval:  %u ticks\n", _measure_ticks);
 	printf("battery_status: %.3f\n", (double)_battery_voltage_filtered_v);
+	printf("arming_state: %d\n", _arming_state);
+
 }
 
 
