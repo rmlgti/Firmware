@@ -125,7 +125,7 @@ AMS::set_ams_item()
 
 		_mission_item.yaw = NAN;
 
-		_mission_item.acceptance_radius = _navigator->get_acceptance_radius();
+		_mission_item.acceptance_radius = 100.f;
 		_mission_item.time_inside = 0.0f;
 		_mission_item.autocontinue = true;
 		_mission_item.origin = ORIGIN_ONBOARD;

@@ -75,7 +75,8 @@ bool FlightTaskAutoMapper2::update()
 
 	/* fallthrought */
 	case WaypointType::position:
-		_preparePositionSetpoints();
+		_prepareVelocitySetpoints();
+		//_preparePositionSetpoints();
 		break;
 
 	case WaypointType::takeoff:
@@ -147,9 +148,10 @@ void FlightTaskAutoMapper2::_prepareVelocitySetpoints()
 {
 	// XY Velocity waypoint
 	// TODO : Rewiew that. What is the expected behavior?
-	_position_setpoint = Vector3f(NAN, NAN, _position(2));
-	Vector2f vel_sp_xy = Vector2f(_velocity).unit_or_zero() * _mc_cruise_speed;
+	_position_setpoint = Vector3f(NAN, NAN, _target(2));
+	Vector2f vel_sp_xy = Vector2f(0.f, 0.f);
 	_velocity_setpoint = Vector3f(vel_sp_xy(0), vel_sp_xy(1), NAN);
+	_yaw_setpoint = _yaw;
 }
 
 void FlightTaskAutoMapper2::_preparePositionSetpoints()
