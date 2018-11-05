@@ -129,17 +129,14 @@ MPU9250_mag::init()
 
 	/* if cdev init failed, bail now */
 	if (ret != OK) {
-		if (_parent->_device_type == MPU_DEVICE_TYPE_MPU9250) { DEVICE_DEBUG("MPU9250 mag init failed"); }
-
-		else { DEVICE_DEBUG("ICM20948 mag init failed"); }
-
+		DEVICE_DEBUG("MPU9250 mag init failed");
 		return ret;
 	}
 
 	_mag_reports = new ringbuffer::RingBuffer(2, sizeof(mag_report));
 
 	if (_mag_reports == nullptr) {
-		return -ENOMEM;
+		return -ENOMEM;;
 	}
 
 	_mag_class_instance = register_class_devname(MAG_BASE_DEVICE_PATH);
@@ -150,8 +147,8 @@ MPU9250_mag::init()
 	_mag_reports->get(&mrp);
 
 	_mag_topic = orb_advertise_multi(ORB_ID(sensor_mag), &mrp,
-					 &_mag_orb_class_instance, (_parent->is_external()) ? ORB_PRIO_VERY_HIGH : ORB_PRIO_DEFAULT);
-//    &_mag_orb_class_instance, ORB_PRIO_LOW);
+					 &_mag_orb_class_instance, ORB_PRIO_LOW);
+	//			   &_mag_orb_class_instance, (is_external()) ? ORB_PRIO_MAX - 1 : ORB_PRIO_HIGH - 1);
 
 	if (_mag_topic == nullptr) {
 		PX4_ERR("ADVERT FAIL");
@@ -176,23 +173,10 @@ bool MPU9250_mag::check_duplicate(uint8_t *mag_data)
 void
 MPU9250_mag::measure()
 {
-	uint8_t ret;
-	union raw_data_t {
-		struct ak8963_regs ak8963_data;
-		struct ak09916_regs ak09916_data;
-	} raw_data;
+	struct ak8963_regs data;
 
-	if (_parent->_device_type == MPU_DEVICE_TYPE_MPU9250) {
-		ret = _interface->read(AK8963REG_ST1, &raw_data, sizeof(struct ak8963_regs));
-
-	} else { // ICM20948 --> AK09916
-		ret = _interface->read(AK09916REG_ST1, &raw_data, sizeof(struct ak09916_regs));
-	}
-
-	if (ret == OK) {
-		if (_parent->_device_type == MPU_DEVICE_TYPE_ICM20948) { raw_data.ak8963_data.st2 = raw_data.ak09916_data.st2; }
-
-		_measure(raw_data.ak8963_data);
+	if (OK == _interface->read(AK8963REG_ST1, &data, sizeof(struct ak8963_regs))) {
+		_measure(data);
 	}
 }
 
@@ -221,52 +205,22 @@ MPU9250_mag::_measure(struct ak8963_regs data)
 
 	mag_report	mrb;
 	mrb.timestamp = hrt_absolute_time();
-//	mrb.is_external = false;
-
-	// need a better check here. Using _parent->is_external() for mpu9250 also sets the
-	// internal magnetometers connected to the "external" spi bus as external, at least
-	// on Pixhawk 2.1. For now assuming the ICM20948 is only used on Here GPS, hence external.
-	if (_parent->_device_type == MPU_DEVICE_TYPE_ICM20948) {
-		mrb.is_external = _parent->is_external();
-
-	} else {
-		mrb.is_external = false;
-	}
+	mrb.is_external = false;
 
 	/*
 	 * Align axes - note the accel & gryo are also re-aligned so this
 	 *              doesn't look obvious with the datasheet
 	 */
-	float xraw_f, yraw_f, zraw_f;
+	mrb.x_raw =  data.x;
+	mrb.y_raw = -data.y;
+	mrb.z_raw = -data.z;
 
-	if (_parent->_device_type == MPU_DEVICE_TYPE_ICM20948) {
-		/*
-		 * Keeping consistent with the accel and gyro axes of the ICM20948 here, just aligning the magnetometer to them.
-		 */
-		mrb.x_raw = data.y;
-		mrb.y_raw = data.x;
-		mrb.z_raw = -data.z;
-
-		xraw_f = data.y;
-		yraw_f = data.x;
-		zraw_f = -data.z;
-
-	} else {
-		mrb.x_raw =  data.x;
-		mrb.y_raw = -data.y;
-		mrb.z_raw = -data.z;
-
-		xraw_f =  data.x;
-		yraw_f = -data.y;
-		zraw_f = -data.z;
-	}
+	float xraw_f =  data.x;
+	float yraw_f = -data.y;
+	float zraw_f = -data.z;
 
 	/* apply user specified rotation */
 	rotate_3f(_parent->_rotation, xraw_f, yraw_f, zraw_f);
-
-	if (_parent->_device_type == MPU_DEVICE_TYPE_ICM20948) {
-		rotate_3f(ROTATION_YAW_270, xraw_f, yraw_f, zraw_f); //offset between accel/gyro and mag on icm20948
-	}
 
 	mrb.x = ((xraw_f * _mag_range_scale * _mag_asa_x) - _mag_scale.x_offset) * _mag_scale.x_scale;
 	mrb.y = ((yraw_f * _mag_range_scale * _mag_asa_y) - _mag_scale.y_offset) * _mag_scale.y_scale;
@@ -336,11 +290,6 @@ MPU9250_mag::read(struct file *filp, char *buffer, size_t buflen)
 int
 MPU9250_mag::ioctl(struct file *filp, int cmd, unsigned long arg)
 {
-	/*
-	 * Repeated in MPU9250_accel::ioctl
-	 * Both accel and mag CDev could be unused in case of magnetometer only mode or MPU6500
-	 */
-
 	switch (cmd) {
 
 	case SENSORIOCRESET:
@@ -351,8 +300,11 @@ MPU9250_mag::ioctl(struct file *filp, int cmd, unsigned long arg)
 
 			/* switching to manual polling */
 			case SENSOR_POLLRATE_MANUAL:
-				_parent->stop();
-				_parent->_call_interval = 0;
+				/*
+				 * TODO: investigate being able to stop
+				 *       the continuous sampling
+				 */
+				//stop();
 				return OK;
 
 			/* external signalling not supported */
@@ -364,24 +316,24 @@ MPU9250_mag::ioctl(struct file *filp, int cmd, unsigned long arg)
 
 			/* set default/max polling rate */
 			case SENSOR_POLLRATE_MAX:
-				return ioctl(filp, SENSORIOCSPOLLRATE, 1000);
+				return ioctl(filp, SENSORIOCSPOLLRATE, 100);
 
 			case SENSOR_POLLRATE_DEFAULT:
-				return ioctl(filp, SENSORIOCSPOLLRATE, MPU9250_ACCEL_DEFAULT_RATE);
+				return ioctl(filp, SENSORIOCSPOLLRATE, MPU9250_AK8963_SAMPLE_RATE);
 
 			/* adjust to a legal polling interval in Hz */
-			default:
-				/* mag is polled through main driver only */
-				return _parent->_set_pollrate(arg);
+			default: {
+					if (MPU9250_AK8963_SAMPLE_RATE != arg) {
+						return -EINVAL;
+					}
+
+					return OK;
+				}
 			}
 		}
 
 	case SENSORIOCGPOLLRATE:
-		if (_parent->_call_interval == 0) {
-			return SENSOR_POLLRATE_MANUAL;
-		}
-
-		return 1000000 / _parent->_call_interval;
+		return MPU9250_AK8963_SAMPLE_RATE;
 
 	case SENSORIOCSQUEUEDEPTH: {
 			/* lower bound is mandatory, upper bound is a sanity check */
@@ -436,20 +388,19 @@ MPU9250_mag::set_passthrough(uint8_t reg, uint8_t size, uint8_t *out)
 {
 	uint8_t addr;
 
-	_parent->write_reg(AK_MPU_OR_ICM(MPUREG_I2C_SLV0_CTRL, ICMREG_20948_I2C_SLV0_CTRL),
-			   0); // ensure slave r/w is disabled before changing the registers
+	_parent->write_reg(MPUREG_I2C_SLV0_CTRL, 0); // ensure slave r/w is disabled before changing the registers
 
 	if (out) {
-		_parent->write_reg(AK_MPU_OR_ICM(MPUREG_I2C_SLV0_D0, ICMREG_20948_I2C_SLV0_DO), *out);
+		_parent->write_reg(MPUREG_I2C_SLV0_D0, *out);
 		addr = AK8963_I2C_ADDR;
 
 	} else {
 		addr = AK8963_I2C_ADDR | BIT_I2C_READ_FLAG;
 	}
 
-	_parent->write_reg(AK_MPU_OR_ICM(MPUREG_I2C_SLV0_ADDR, ICMREG_20948_I2C_SLV0_ADDR), addr);
-	_parent->write_reg(AK_MPU_OR_ICM(MPUREG_I2C_SLV0_REG, ICMREG_20948_I2C_SLV0_REG),  reg);
-	_parent->write_reg(AK_MPU_OR_ICM(MPUREG_I2C_SLV0_CTRL, ICMREG_20948_I2C_SLV0_CTRL), size | BIT_I2C_SLV0_EN);
+	_parent->write_reg(MPUREG_I2C_SLV0_ADDR, addr);
+	_parent->write_reg(MPUREG_I2C_SLV0_REG,  reg);
+	_parent->write_reg(MPUREG_I2C_SLV0_CTRL, size | BIT_I2C_SLV0_EN);
 }
 
 void
@@ -463,8 +414,8 @@ MPU9250_mag::passthrough_read(uint8_t reg, uint8_t *buf, uint8_t size)
 {
 	set_passthrough(reg, size);
 	usleep(25 + 25 * size); // wait for the value to be read from slave
-	read_block(AK_MPU_OR_ICM(MPUREG_EXT_SENS_DATA_00, ICMREG_20948_EXT_SLV_SENS_DATA_00), buf, size);
-	_parent->write_reg(AK_MPU_OR_ICM(MPUREG_I2C_SLV0_CTRL, ICMREG_20948_I2C_SLV0_CTRL), 0); // disable new reads
+	read_block(MPUREG_EXT_SENS_DATA_00, buf, size);
+	_parent->write_reg(MPUREG_I2C_SLV0_CTRL, 0); // disable new reads
 }
 
 uint8_t
@@ -499,7 +450,7 @@ MPU9250_mag::passthrough_write(uint8_t reg, uint8_t val)
 {
 	set_passthrough(reg, 1, &val);
 	usleep(50); // wait for the value to be written to slave
-	_parent->write_reg(AK_MPU_OR_ICM(MPUREG_I2C_SLV0_CTRL, ICMREG_20948_I2C_SLV0_CTRL), 0); // disable new writes
+	_parent->write_reg(MPUREG_I2C_SLV0_CTRL, 0); // disable new writes
 }
 
 
@@ -529,7 +480,7 @@ MPU9250_mag::ak8963_reset(void)
 	if (rv == OK) {
 
 		// Now reset the mag
-		write_reg(AK_MPU_OR_ICM(AK8963REG_CNTL2, AK09916REG_CNTL3), AK8963_RESET);
+		write_reg(AK8963REG_CNTL2, AK8963_RESET);
 		// Then re-initialize the bus/mag
 		rv = ak8963_setup();
 	}
@@ -580,18 +531,11 @@ MPU9250_mag::ak8963_setup_master_i2c(void)
 	 * in master mode (SPI to I2C bridge)
 	 */
 	if (_interface == nullptr) {
-		if (_parent->_device_type == MPU_DEVICE_TYPE_MPU9250) {
-			_parent->modify_checked_reg(MPUREG_USER_CTRL, 0, BIT_I2C_MST_EN);
-			_parent->write_reg(MPUREG_I2C_MST_CTRL, BIT_I2C_MST_P_NSR | BIT_I2C_MST_WAIT_FOR_ES | BITS_I2C_MST_CLOCK_400HZ);
-
-		} else { // ICM20948 -> AK09916
-			_parent->modify_checked_reg(ICMREG_20948_USER_CTRL, 0, BIT_I2C_MST_EN);
-			// WAIT_FOR_ES does not exist for ICM20948. Not sure how to replace this (or if that is needed)
-			_parent->write_reg(ICMREG_20948_I2C_MST_CTRL, BIT_I2C_MST_P_NSR | ICM_BITS_I2C_MST_CLOCK_400HZ);
-		}
+		_parent->modify_checked_reg(MPUREG_USER_CTRL, 0, BIT_I2C_MST_EN);
+		_parent->write_reg(MPUREG_I2C_MST_CTRL, BIT_I2C_MST_P_NSR | BIT_I2C_MST_WAIT_FOR_ES | BITS_I2C_MST_CLOCK_400HZ);
 
 	} else {
-		_parent->modify_checked_reg(AK_MPU_OR_ICM(MPUREG_USER_CTRL, ICMREG_20948_USER_CTRL), BIT_I2C_MST_EN, 0);
+		_parent->modify_checked_reg(MPUREG_USER_CTRL, BIT_I2C_MST_EN, 0);
 	}
 
 	return OK;
@@ -604,7 +548,7 @@ MPU9250_mag::ak8963_setup(void)
 	do {
 
 		ak8963_setup_master_i2c();
-		write_reg(AK_MPU_OR_ICM(AK8963REG_CNTL2, AK09916REG_CNTL3), AK8963_RESET);
+		write_reg(AK8963REG_CNTL2, AK8963_RESET);
 
 		uint8_t id = 0;
 
@@ -613,41 +557,33 @@ MPU9250_mag::ak8963_setup(void)
 		}
 
 		retries--;
-		PX4_WARN("AK8963: bad id %d retries %d", id, retries);
-		_parent->modify_reg(AK_MPU_OR_ICM(MPUREG_USER_CTRL, ICMREG_20948_USER_CTRL), 0, BIT_I2C_MST_RST);
+		PX4_ERR("AK8963: bad id %d retries %d", id, retries);
+		_parent->modify_reg(MPUREG_USER_CTRL, 0, BIT_I2C_MST_RST);
 		up_udelay(100);
 	} while (retries > 0);
 
-	/* No sensitivity adjustments available for AK09916/ICM20948 */
-	if (_parent->_device_type == MPU_DEVICE_TYPE_MPU9250) {
-		if (retries > 0) {
-			retries = 10;
+	if (retries > 0) {
+		retries = 10;
 
-			while (!ak8963_read_adjustments() && retries) {
-				retries--;
-				PX4_ERR("AK8963: failed to read adjustment data. Retries %d", retries);
+		while (!ak8963_read_adjustments() && retries) {
+			retries--;
+			PX4_ERR("AK8963: failed to read adjustment data. Retries %d", retries);
 
-				_parent->modify_reg(AK_MPU_OR_ICM(MPUREG_USER_CTRL, ICMREG_20948_USER_CTRL), 0, BIT_I2C_MST_RST);
-				up_udelay(100);
-				ak8963_setup_master_i2c();
-				write_reg(AK_MPU_OR_ICM(AK8963REG_CNTL2, AK09916REG_CNTL3), AK8963_RESET);
-			}
+			_parent->modify_reg(MPUREG_USER_CTRL, 0, BIT_I2C_MST_RST);
+			up_udelay(100);
+			ak8963_setup_master_i2c();
+			write_reg(AK8963REG_CNTL2, AK8963_RESET);
 		}
 	}
 
 	if (retries == 0) {
 		PX4_ERR("AK8963: failed to initialize, disabled!");
-		_parent->modify_checked_reg(AK_MPU_OR_ICM(MPUREG_USER_CTRL, ICMREG_20948_USER_CTRL), BIT_I2C_MST_EN, 0);
-		_parent->write_reg(AK_MPU_OR_ICM(MPUREG_I2C_MST_CTRL, ICMREG_20948_I2C_MST_CTRL), 0);
+		_parent->modify_checked_reg(MPUREG_USER_CTRL, BIT_I2C_MST_EN, 0);
+		_parent->write_reg(MPUREG_I2C_MST_CTRL, 0);
 		return -EIO;
 	}
 
-	if (_parent->_device_type == MPU_DEVICE_TYPE_MPU9250) {
-		write_reg(AK8963REG_CNTL1, AK8963_CONTINUOUS_MODE2 | AK8963_16BIT_ADC);
-
-	} else { // ICM20948 -> AK09916
-		write_reg(AK09916REG_CNTL2, AK09916_CNTL2_CONTINOUS_MODE_100HZ);
-	}
+	write_reg(AK8963REG_CNTL1, AK8963_CONTINUOUS_MODE2 | AK8963_16BIT_ADC);
 
 
 	if (_interface == NULL) {
@@ -655,13 +591,7 @@ MPU9250_mag::ak8963_setup(void)
 		/* Configure mpu' I2c Master interface to read ak8963 data
 		 * Into to fifo
 		 */
-		if (_parent->_device_type == MPU_DEVICE_TYPE_MPU9250) {
-			set_passthrough(AK8963REG_ST1, sizeof(struct ak8963_regs));
-
-		} else { // ICM20948 -> AK09916
-			set_passthrough(AK09916REG_ST1, sizeof(struct ak09916_regs));
-		}
-
+		set_passthrough(AK8963REG_ST1, sizeof(struct ak8963_regs));
 	}
 
 	return OK;

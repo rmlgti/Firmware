@@ -158,10 +158,6 @@ fi
 
 if ver hwcmp PX4FMU_V2
 then
-	# probe for ICM20948 (Here GPS) on external I2C. Rotation 6 (270 deg yaw)
-	# for the accel and gyro and rotation 4 (180 deg yaw)
-	mpu9250 -X -M -R 6 start
-
 	# External I2C bus
 	hmc5883 -C -T -X start
 	lis3mdl -X start
@@ -214,8 +210,7 @@ then
 	if [ $BOARD_FMUV3 != 0 ]
 	then
 		# sensor heating is available, but we disable it for now
-		param set SENS_EN_THERMAL 0        
-        
+		param set SENS_EN_THERMAL 0
 
 		# external L3GD20H is rotated 180 degrees yaw
 		l3gd20 -X -R 4 start
@@ -235,7 +230,7 @@ then
 		if [ $BOARD_FMUV3 = 21 ]
 		then
 			# v2.1 internal MPU9250 is rotated 180 deg roll, 270 deg yaw
-			mpu9250 -s -R 14 start
+			mpu9250 -R 14 start
 		fi
 
 	else
@@ -343,7 +338,6 @@ then
 
 	# Possible external compasses
 	hmc5883 -C -T -X start
-	mpu9250 -X -M -R 6 start
 
 	# Possible external compasses
 	ist8310 -C -b 1 start
