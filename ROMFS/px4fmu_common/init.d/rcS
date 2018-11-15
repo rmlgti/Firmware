@@ -532,7 +532,7 @@ else
 	#
 	# Start the navigator.
 	#
-	navigator start
+	#navigator start
 
 	#
 	# Start the standalone wind estimator.
@@ -567,6 +567,8 @@ else
 	then
 		px4flow start &
 	fi
+
+	osd start
 
 	#
 	# Start any custom addons.

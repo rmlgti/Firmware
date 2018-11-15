@@ -55,7 +55,7 @@ OSD::OSD(int bus) :
 	_battery_valid(false),
 	_local_position_z(0),
 	_local_position_valid(false),
-	_arming_state(0),
+	_arming_state(1),
 	_arming_timestamp(0)
 {
 	// enable debug() calls
@@ -96,8 +96,14 @@ OSD::init()
 		goto fail;
 	}
 
+	for (int i = 0; i < OSD_CHARS_PER_ROW; i++) {
+		for (int j = 0; j < 17; j++) {
+			add_character_to_screen(' ', i, j);
+		}
+	}
+
 	_battery_sub = orb_subscribe(ORB_ID(battery_status));
-	_local_position_sub = orb_subscribe(ORB_ID(vehicle_local_position));
+	// _local_position_sub = orb_subscribe(ORB_ID(vehicle_local_position));
 	_vehicle_status_sub = orb_subscribe(ORB_ID(vehicle_status));
 
 	return PX4_OK;
@@ -334,7 +340,7 @@ int
 OSD::update_topics()//TODO have an argument to choose what to update and return validity
 {
 	struct battery_status_s battery = {};
-	struct vehicle_local_position_s local_position = {};
+	// struct vehicle_local_position_s local_position = {};
 	struct vehicle_status_s vehicle_status = {};
 
 	bool updated = false;
@@ -356,27 +362,56 @@ OSD::update_topics()//TODO have an argument to choose what to update and return 
 	}
 
 	/* update vehicle local position subscription */
-	orb_check(_local_position_sub, &updated);
+	// orb_check(_local_position_sub, &updated);
 
-	if (updated) {
-		if (local_position.z_valid) {
-			_local_position_z = -local_position.z;
-			_local_position_valid = true;
+	// if (updated) {
+	// 	if (local_position.z_valid) {
+	// 		_local_position_z = -local_position.z;
+	// 		_local_position_valid = true;
 
-		} else {
-			_local_position_valid = false;
-		}
-	}
+	// 	} else {
+	// 		_local_position_valid = false;
+	// 	}
+	// }
 
 	/* update vehicle status subscription */
 	orb_check(_vehicle_status_sub, &updated);
 
 	if (updated) {
-		if (vehicle_status.arming_state > 0 && _arming_state == 0) {
+		if (vehicle_status.arming_state == 2 && _arming_state == 1) {
 			_arming_timestamp = hrt_absolute_time();
+			_arming_state = 2;
+
+		} else if (vehicle_status.arming_state == 1 && _arming_state == 2) {
+			_arming_state = 1;
 		}
 
-		_arming_state = vehicle_status.arming_state;
+
+		if (vehicle_status.nav_state == vehicle_status.NAVIGATION_STATE_ACRO) {
+			add_character_to_screen('A', 1, 7);
+			add_character_to_screen('C', 2, 7);
+			add_character_to_screen('R', 3, 7);
+			add_character_to_screen('O', 4, 7);
+
+		} else if (vehicle_status.nav_state == vehicle_status.NAVIGATION_STATE_STAB) {
+			add_character_to_screen('S', 1, 8);
+			add_character_to_screen('T', 2, 8);
+			add_character_to_screen('A', 3, 8);
+			add_character_to_screen('B', 4, 8);
+			add_character_to_screen('I', 5, 8);
+			add_character_to_screen('L', 6, 8);
+			add_character_to_screen('I', 7, 8);
+			add_character_to_screen('Z', 8, 8);
+			add_character_to_screen('E', 9, 8);
+
+		} else if (vehicle_status.nav_state == vehicle_status.NAVIGATION_STATE_MANUAL) {
+			// add_character_to_screen('A', uint8_t pos_x, uint8_t pos_y)
+			// add_character_to_screen('C', uint8_t pos_x, uint8_t pos_y)
+			// add_character_to_screen('R', uint8_t pos_x, uint8_t pos_y)
+			// add_character_to_screen('O', uint8_t pos_x, uint8_t pos_y)
+		}
+
+		// _arming_state = vehicle_status.arming_state;
 	}
 
 	return PX4_OK;
@@ -398,11 +433,11 @@ OSD::update_screen()
 		ret |= add_altitude(2, 3);
 	}
 
-	if (_arming_state > 0) {
-		float flight_time_sec = static_cast<float>((hrt_absolute_time() - _arming_timestamp) / (1.0e6));
-		ret |= add_flighttime_symbol(1, 5);
-		ret |= add_flighttime(flight_time_sec, 2, 5);
-	}
+	// if (_arming_state == 2) {
+	float flight_time_sec = static_cast<float>((hrt_absolute_time() - _arming_timestamp) / (1.0e6));
+	ret |= add_flighttime_symbol(1, 5);
+	ret |= add_flighttime(flight_time_sec, 2, 5);
+	// }
 
 	// enable_screen();
 
@@ -446,7 +481,7 @@ OSD::cycle()
 {
 	update_topics();
 
-	if (_battery_valid || _local_position_valid || _arming_state > 0) {
+	if (_battery_valid || _local_position_valid || _arming_state > 1) {
 		update_screen();
 	}
 
@@ -467,6 +502,7 @@ OSD::print_info()
 	printf("poll interval:  %u ticks\n", _measure_ticks);
 	printf("battery_status: %.3f\n", (double)_battery_voltage_filtered_v);
 	printf("arming_state: %d\n", _arming_state);
+	printf("arming_timestamp: %5.1f\n", (double)_arming_timestamp);
 
 }
 
