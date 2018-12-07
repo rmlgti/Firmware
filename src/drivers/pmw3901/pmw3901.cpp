@@ -574,8 +574,9 @@ PMW3901::collect()
 
 	_flow_sum_x += delta_x_raw;
 	_flow_sum_y += delta_y_raw;
-
-	if (_flow_dt_sum_usec < 45000) {
+	// 45000 = 22hz publish rate to EKF => decrease to publish more data
+	
+	if (_flow_dt_sum_usec < 15000) {
 
 		return ret;
 	}
