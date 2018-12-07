@@ -399,11 +399,6 @@ PMW3901::init()
 	_previous_collect_timestamp = hrt_absolute_time();
 
 
-	// gyro 
-	sensor_combined_s sensor_combined;
-	orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combined);
-	_previous_collect_timestamp_gyro = sensor_combined.timestamp;
-
 out:
 	return ret;
 
@@ -600,25 +595,28 @@ PMW3901::collect()
 
 
 	// gyro delta ang and delta t 
-	sensor_combined_s sensor_combined;
-	// bool gyro_updated = false;
-	// orb_check(_sensor_gyro_sub, &updated);
-	orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combined);
+	sensor_combined_s sensor_combine= {};
+
+	_ang_sum_x_gyro = orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine);
+
+	if(orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine)  == PX4_OK){
+		_ang_sum_x_gyro += 1.32f;
+		_ang_sum_y_gyro += sensor_combine.gyro_rad[1]*(float)sensor_combine.gyro_integral_dt*1e-6f;
+		_ang_sum_z_gyro += sensor_combine.gyro_rad[2]*(float)sensor_combine.gyro_integral_dt*1e-6f;
+		_dt_sum_usec_gyro += sensor_combine.gyro_integral_dt;
+	}
+	
 	// uint64_t timestamp_gyro = sensor_combined.timestamp;
 	// uint64_t dt_gyro = timestamp_gyro - _previous_collect_timestamp_gyro;
 	// _previous_collect_timestamp_gyro = timestamp_gyro;
 
-	_dt_sum_usec_gyro += sensor_combined.gyro_integral_dt;
+
 
 	readMotionCount(delta_x_raw, delta_y_raw);
 
 	_flow_sum_x += delta_x_raw;
 	_flow_sum_y += delta_y_raw;
 
-	//gyro 
-	_ang_sum_x_gyro += sensor_combined.gyro_rad[0]*sensor_combined.gyro_integral_dt*1e-6f;
-	_ang_sum_y_gyro += sensor_combined.gyro_rad[1]*sensor_combined.gyro_integral_dt*1e-6f;
-	_ang_sum_z_gyro += sensor_combined.gyro_rad[2]*sensor_combined.gyro_integral_dt*1e-6f;
 
 
 
@@ -667,9 +665,9 @@ PMW3901::collect()
 	report.gyro_x_rate_integral = static_cast<float>(_ang_sum_x_gyro*time_ratio);
 	report.gyro_y_rate_integral = static_cast<float>(_ang_sum_y_gyro*time_ratio);
 	report.gyro_z_rate_integral = static_cast<float>(_ang_sum_z_gyro*time_ratio);
-	// report.gyro_x_rate_integral = static_cast<float>(sensor_gyro.x_integral);
-	// report.gyro_y_rate_integral = static_cast<float>(sensor_gyro.y_integral);
-	// report.gyro_z_rate_integral = static_cast<float>(sensor_gyro.z_integral);
+	// report.gyro_x_rate_integral = NAN;
+	// report.gyro_y_rate_integral = NAN;
+	// report.gyro_z_rate_integral = NAN;
 
 	// set (conservative) specs according to datasheet
 	report.max_flow_rate = 5.0f;       // Datasheet: 7.4 rad/s
@@ -681,9 +679,9 @@ PMW3901::collect()
 	_flow_sum_y = 0;
 
 	_dt_sum_usec_gyro = 0;
-	_ang_sum_x_gyro = 1;
-	_ang_sum_y_gyro = 2;
-	_ang_sum_z_gyro = 3;
+	_ang_sum_x_gyro = 0;
+	_ang_sum_y_gyro = 0;
+	_ang_sum_z_gyro = 0;
 
 
 	if (_optical_flow_pub == nullptr) {
