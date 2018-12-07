@@ -140,6 +140,9 @@ private:
 	int _class_instance;
 	int _orb_class_instance;
 
+	// handle motion
+	int			_gyro_sub{-1};
+
 	orb_advert_t _optical_flow_pub;
 	orb_advert_t _subsystem_pub;
 
@@ -148,10 +151,17 @@ private:
 
 	uint64_t _previous_collect_timestamp;
 
+	//gyro
+	uint64_t _previous_collect_timestamp_gyro;
+
 	enum Rotation _yaw_rotation;
 	int _flow_sum_x = 0;
 	int _flow_sum_y = 0;
 	uint64_t _flow_dt_sum_usec = 0;
+
+	int _ang_sum_x_gyro = 0;
+	int _ang_sum_y_gyro = 0;
+	uint64_t _dt_sum_usec_gyro = 0;
 
 
 	/**
@@ -205,12 +215,16 @@ PMW3901::PMW3901(int bus, enum Rotation yaw_rotation) :
 	_measure_ticks(0),
 	_class_instance(-1),
 	_orb_class_instance(-1),
+
 	_optical_flow_pub(nullptr),
 	_subsystem_pub(nullptr),
 	_sample_perf(perf_alloc(PC_ELAPSED, "pmw3901_read")),
 	_comms_errors(perf_alloc(PC_COUNT, "pmw3901_com_err")),
 	_previous_collect_timestamp(0),
-	_yaw_rotation(yaw_rotation)
+	_yaw_rotation(yaw_rotation),
+
+	//handle the motion calculation here instead of in ekf2
+	_sensor_gyro_sub= orb_subscribe(ORB_ID(sensor_gyro));,
 {
 
 	// enable debug() calls
@@ -233,6 +247,8 @@ PMW3901::~PMW3901()
 	// free perf counters
 	perf_free(_sample_perf);
 	perf_free(_comms_errors);
+
+	orb_unsubscribe(_sensor_gyro_sub);
 }
 
 
@@ -376,6 +392,12 @@ PMW3901::init()
 	_sensor_ok = true;
 	_previous_collect_timestamp = hrt_absolute_time();
 
+
+	// gyro 
+	sensor_gyro_s sensor_gyro;
+	orb_copy(ORB_ID(sensor_gyro), _sensor_gyro_sub, &sensor_gyro);
+	_previous_collect_timestamp_gyro = sensor_gyro.timestamp;
+	
 out:
 	return ret;
 
@@ -591,6 +613,13 @@ PMW3901::collect()
 	report.pixel_flow_x_integral = static_cast<float>(delta_x);
 	report.pixel_flow_y_integral = static_cast<float>(delta_y);
 
+
+	// add gyro stuff here
+	sensor_gyro_s sensor_gyro;
+	bool gyro_updated = false;
+	orb_check(_sensor_gyro_sub, &updated);
+	orb_copy(ORB_ID(manual_control_setpoint), _manual_control_setpoint_sub, &manual_control_setpoint);
+
 	// rotate measurements in yaw from sensor frame to body frame according to parameter SENS_FLOW_ROT
 	float zeroval = 0.0f;
 	rotate_3f(_yaw_rotation, report.pixel_flow_x_integral, report.pixel_flow_y_integral, zeroval);
@@ -611,9 +640,9 @@ PMW3901::collect()
 	}
 
 	/* No gyro on this board */
-	report.gyro_x_rate_integral = NAN;
-	report.gyro_y_rate_integral = NAN;
-	report.gyro_z_rate_integral = NAN;
+	report.gyro_x_rate_integral =  static_cast<float>(delta_x);
+	report.gyro_y_rate_integral =  static_cast<float>(delta_x);
+	report.gyro_z_rate_integral =  static_cast<float>(delta_x);
 
 	// set (conservative) specs according to datasheet
 	report.max_flow_rate = 5.0f;       // Datasheet: 7.4 rad/s
