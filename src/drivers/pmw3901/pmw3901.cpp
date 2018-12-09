@@ -661,7 +661,14 @@ PMW3901::collect()
 	}
 
 	/* No gyro on this board */
-	float time_ratio= 1.0f;//(_flow_dt_sum_usec / _dt_sum_usec_gyro);
+	float time_ratio;
+	if (_flow_dt_sum_usec > 0 && _dt_sum_usec_gyro > 0) {
+		// calculate scale factor used to compensate for gyro data being summed across a different time period
+		time_ratio = (float)_flow_dt_sum_usec / (float)_dt_sum_usec_gyro;
+	} else {
+		// can't calculate so use 1
+		time_ratio = 1.0f;
+	}
 	report.gyro_x_rate_integral = static_cast<float>(_ang_sum_x_gyro*time_ratio);
 	report.gyro_y_rate_integral = static_cast<float>(_ang_sum_y_gyro*time_ratio);
 	report.gyro_z_rate_integral = static_cast<float>(_ang_sum_z_gyro*time_ratio);
