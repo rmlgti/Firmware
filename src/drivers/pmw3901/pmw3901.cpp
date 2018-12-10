@@ -104,7 +104,7 @@
 
 /* PMW3901 Registers addresses */
 #define PMW3901_US 1000 /*   1 ms */
-#define PMW3901_SAMPLE_RATE 4000 /*  10 ms */
+#define PMW3901_SAMPLE_RATE 10000 /*  10 ms */
 
 
 #ifndef CONFIG_SCHED_WORKQUEUE
@@ -594,17 +594,22 @@ PMW3901::collect()
 	_flow_dt_sum_usec += dt_flow;
 
 
-	// gyro delta ang and delta t 
-	sensor_combined_s sensor_combine= {};
+	// // gyro delta ang and delta t 
+	// sensor_combined_s sensor_combine= {};
 
-	_ang_sum_x_gyro = orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine);
+	// _ang_sum_x_gyro = orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine);
 
-	if(orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine)  == PX4_OK){
-		_ang_sum_x_gyro += 1.32f;
-		_ang_sum_y_gyro += sensor_combine.gyro_rad[1]*(float)sensor_combine.gyro_integral_dt*1e-6f;
-		_ang_sum_z_gyro += sensor_combine.gyro_rad[2]*(float)sensor_combine.gyro_integral_dt*1e-6f;
-		_dt_sum_usec_gyro += sensor_combine.gyro_integral_dt;
-	}
+	// if (_ang_sum_x_gyro < 0) {
+	// 		PX4_ERR("copy failed (%i)", errno);
+	// 		return ret;
+	// }
+
+	// if(orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine)  == PX4_OK){
+	// 	_ang_sum_x_gyro += 1.32f;
+	// 	_ang_sum_y_gyro += sensor_combine.gyro_rad[1]*(float)sensor_combine.gyro_integral_dt*1e-6f;
+	// 	_ang_sum_z_gyro += sensor_combine.gyro_rad[2]*(float)sensor_combine.gyro_integral_dt*1e-6f;
+	// 	_dt_sum_usec_gyro += sensor_combine.gyro_integral_dt;
+	// }
 	
 	// uint64_t timestamp_gyro = sensor_combined.timestamp;
 	// uint64_t dt_gyro = timestamp_gyro - _previous_collect_timestamp_gyro;
@@ -661,13 +666,13 @@ PMW3901::collect()
 	}
 
 	/* No gyro on this board */
-	float time_ratio= 1.0f;//(_flow_dt_sum_usec / _dt_sum_usec_gyro);
-	report.gyro_x_rate_integral = static_cast<float>(_ang_sum_x_gyro*time_ratio);
-	report.gyro_y_rate_integral = static_cast<float>(_ang_sum_y_gyro*time_ratio);
-	report.gyro_z_rate_integral = static_cast<float>(_ang_sum_z_gyro*time_ratio);
-	// report.gyro_x_rate_integral = NAN;
-	// report.gyro_y_rate_integral = NAN;
-	// report.gyro_z_rate_integral = NAN;
+	// float time_ratio= 1.0f;//(_flow_dt_sum_usec / _dt_sum_usec_gyro);
+	// report.gyro_x_rate_integral = static_cast<float>(_ang_sum_x_gyro*time_ratio);
+	// report.gyro_y_rate_integral = static_cast<float>(_ang_sum_y_gyro*time_ratio);
+	// report.gyro_z_rate_integral = static_cast<float>(_ang_sum_z_gyro*time_ratio);
+	report.gyro_x_rate_integral = NAN;
+	report.gyro_y_rate_integral = NAN;
+	report.gyro_z_rate_integral = NAN;
 
 	// set (conservative) specs according to datasheet
 	report.max_flow_rate = 5.0f;       // Datasheet: 7.4 rad/s
