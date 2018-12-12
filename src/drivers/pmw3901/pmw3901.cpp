@@ -160,7 +160,7 @@ private:
 	uint64_t _flow_dt_sum_usec = 0;
 
 
-	uint64_t _debug_dt_sum_usec = 0;
+
 
 	float _ang_sum_x_gyro = 0;
 	float _ang_sum_y_gyro = 0;
@@ -236,7 +236,7 @@ PMW3901::PMW3901(int bus, enum Rotation yaw_rotation) :
 	memset(&_work, 0, sizeof(_work));
 
 	//handle the motion calculation here instead of in ekf2
-	_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
+
 
 }
 
@@ -386,7 +386,8 @@ PMW3901::init()
 	}
 
 	sensorInit();
-
+	//Option A
+	_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
 	/* allocate basic report buffers */
 	_reports = new ringbuffer::RingBuffer(2, sizeof(optical_flow_s));
 
@@ -594,26 +595,26 @@ PMW3901::collect()
 	_flow_dt_sum_usec += dt_flow;
 
 
-	// // gyro delta ang and delta t 
-	// sensor_combined_s sensor_combine= {};
+	// gyro delta ang and delta t 
+	sensor_combined_s sensor_combine= {};
 
-	// _ang_sum_x_gyro = orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine);
+	_ang_sum_x_gyro = orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine);
 
-	// if (_ang_sum_x_gyro < 0) {
-	// 		PX4_ERR("copy failed (%i)", errno);
-	// 		return ret;
-	// }
+	if (_ang_sum_x_gyro < 0) {
+			PX4_ERR("copy failed (%i)", errno);
+			return ret;
+	}
 
-	// if(orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine)  == PX4_OK){
-	// 	_ang_sum_x_gyro += 1.32f;
-	// 	_ang_sum_y_gyro += sensor_combine.gyro_rad[1]*(float)sensor_combine.gyro_integral_dt*1e-6f;
-	// 	_ang_sum_z_gyro += sensor_combine.gyro_rad[2]*(float)sensor_combine.gyro_integral_dt*1e-6f;
-	// 	_dt_sum_usec_gyro += sensor_combine.gyro_integral_dt;
-	// }
+	if(orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine)  == PX4_OK){
+		_ang_sum_x_gyro += 1.32f;
+		_ang_sum_y_gyro += sensor_combine.gyro_rad[1]*(float)sensor_combine.gyro_integral_dt*1e-6f;
+		_ang_sum_z_gyro += sensor_combine.gyro_rad[2]*(float)sensor_combine.gyro_integral_dt*1e-6f;
+		_dt_sum_usec_gyro += sensor_combine.gyro_integral_dt;
+	}
 	
-	// uint64_t timestamp_gyro = sensor_combined.timestamp;
-	// uint64_t dt_gyro = timestamp_gyro - _previous_collect_timestamp_gyro;
-	// _previous_collect_timestamp_gyro = timestamp_gyro;
+	uint64_t timestamp_gyro = sensor_combined.timestamp;
+	uint64_t dt_gyro = timestamp_gyro - _previous_collect_timestamp_gyro;
+	_previous_collect_timestamp_gyro = timestamp_gyro;
 
 
 
@@ -621,10 +622,6 @@ PMW3901::collect()
 
 	_flow_sum_x += delta_x_raw;
 	_flow_sum_y += delta_y_raw;
-
-
-
-
 
 	// 45000 = 22hz publish rate to EKF => decrease to publish more data
 	
@@ -666,18 +663,18 @@ PMW3901::collect()
 	}
 
 	/* No gyro on this board */
-	// float time_ratio= 1.0f;//(_flow_dt_sum_usec / _dt_sum_usec_gyro);
-	// report.gyro_x_rate_integral = static_cast<float>(_ang_sum_x_gyro*time_ratio);
-	// report.gyro_y_rate_integral = static_cast<float>(_ang_sum_y_gyro*time_ratio);
-	// report.gyro_z_rate_integral = static_cast<float>(_ang_sum_z_gyro*time_ratio);
-	report.gyro_x_rate_integral = NAN;
-	report.gyro_y_rate_integral = NAN;
-	report.gyro_z_rate_integral = NAN;
+	float time_ratio= 1.0f;//(_flow_dt_sum_usec / _dt_sum_usec_gyro);
+	report.gyro_x_rate_integral = static_cast<float>(_ang_sum_x_gyro*time_ratio);
+	report.gyro_y_rate_integral = static_cast<float>(_ang_sum_y_gyro*time_ratio);
+	report.gyro_z_rate_integral = static_cast<float>(_ang_sum_z_gyro*time_ratio);
+	// report.gyro_x_rate_integral = NAN;
+	// report.gyro_y_rate_integral = NAN;
+	// report.gyro_z_rate_integral = NAN;
 
 	// set (conservative) specs according to datasheet
 	report.max_flow_rate = 5.0f;       // Datasheet: 7.4 rad/s
 	report.min_ground_distance = 0.1f; // Datasheet: 80mm
-	report.max_ground_distance = 5.0f; // Datasheet: infinity
+	report.max_ground_distance = 25.0f; // Datasheet: infinity
 
 	_flow_dt_sum_usec = 0;
 	_flow_sum_x = 0;
@@ -756,6 +753,9 @@ PMW3901::start()
 	info.ok = true;
 	info.subsystem_type = subsystem_info_s::SUBSYSTEM_TYPE_OPTICALFLOW;
 
+	// Option B
+	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
+	
 	if (_subsystem_pub != nullptr) {
 		orb_publish(ORB_ID(subsystem_info), _subsystem_pub, &info);
 
