@@ -489,11 +489,12 @@ LoggerSubscription* Logger::add_topic(const orb_metadata *topic)
 	} else {
 		PX4_DEBUG("Topic %s does not exist. Not subscribing (yet)", topic->o_name);
 	}
-
+	
 	if (_subscriptions.push_back(LoggerSubscription(fd, topic))) {
 		subscription = &_subscriptions[_subscriptions.size() - 1];
 	} else {
 		PX4_WARN("logger: failed to add topic. Too many subscriptions");
+		//PX4_WARN("unsubscribed to %i %s", fd, topic->o_name);
 		if (fd >= 0) {
 			orb_unsubscribe(fd);
 		}
@@ -677,9 +678,9 @@ void Logger::add_default_topics()
 	add_topic("position_controller_landingstatus");
 	add_topic("offboard_control_mode");
 	add_topic("time_offset");
-	add_topic("vehicle_attitude_groundtruth", 10);
-	add_topic("vehicle_global_position_groundtruth", 100);
-	add_topic("vehicle_local_position_groundtruth", 100);
+	// add_topic("vehicle_attitude_groundtruth", 10);
+	// add_topic("vehicle_global_position_groundtruth", 100);
+	// add_topic("vehicle_local_position_groundtruth", 100);
 	add_topic("vehicle_roi");
 #endif /* CONFIG_ARCH_BOARD_PX4_SITL */
 }
@@ -714,6 +715,7 @@ void Logger::add_estimator_replay_topics()
 	// current EKF2 subscriptions
 	add_topic("airspeed");
 	add_topic("distance_sensor");
+	add_topic("manual_control_setpoint");
 	add_topic("optical_flow");
 	add_topic("sensor_combined");
 	add_topic("sensor_selection");
