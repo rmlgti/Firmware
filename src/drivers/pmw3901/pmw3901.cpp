@@ -236,7 +236,7 @@ PMW3901::PMW3901(int bus, enum Rotation yaw_rotation) :
 	memset(&_work, 0, sizeof(_work));
 
 	//handle the motion calculation here instead of in ekf2
-	_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
+	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
 
 }
 
@@ -262,7 +262,7 @@ int
 PMW3901::sensorInit()
 {
 	uint8_t data[5];
-
+	// _sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
 	// Power on reset
 	writeRegister(0x3A, 0x5A);
 	usleep(5000);
@@ -273,6 +273,7 @@ PMW3901::sensorInit()
 	readRegister(0x04, &data[2], 1);
 	readRegister(0x05, &data[3], 1);
 	readRegister(0x06, &data[4], 1);
+	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
 
 	usleep(1000);
 
@@ -357,7 +358,7 @@ PMW3901::sensorInit()
 	writeRegister(0x7F, 0x00);
 	writeRegister(0x5A, 0x10);
 	writeRegister(0x54, 0x00);
-
+	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
 	return OK;
 
 }
@@ -386,10 +387,10 @@ PMW3901::init()
 	}
 
 	sensorInit();
-
+	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
 	/* allocate basic report buffers */
 	_reports = new ringbuffer::RingBuffer(2, sizeof(optical_flow_s));
-
+	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
 	if (_reports == nullptr) {
 		goto out;
 	}
@@ -397,7 +398,8 @@ PMW3901::init()
 	ret = OK;
 	_sensor_ok = true;
 	_previous_collect_timestamp = hrt_absolute_time();
-
+	
+	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
 
 out:
 	return ret;
@@ -511,7 +513,7 @@ PMW3901::read(device::file_t *filp, char *buffer, size_t buflen)
 		/* if there was no data, warn the caller */
 		return ret ? ret : -EAGAIN;
 	}
-
+	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
 	/* manual measurement - run one conversion */
 	do {
 		_reports->flush();
@@ -594,28 +596,33 @@ PMW3901::collect()
 	_flow_dt_sum_usec += dt_flow;
 
 
-	// // gyro delta ang and delta t 
-	// sensor_combined_s sensor_combine= {};
+	// gyro delta ang and delta t 
 
-	// _ang_sum_x_gyro = orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine);
+	if (_sensor_combined_sub==-1){
+		_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
+	}
+	sensor_combined_s sensor_combine= {};
 
-	// if (_ang_sum_x_gyro < 0) {
-	// 		PX4_ERR("copy failed (%i)", errno);
-	// 		return ret;
-	// }
+	//_ang_sum_x_gyro = orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine);
 
-	// if(orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine)  == PX4_OK){
-	// 	_ang_sum_x_gyro += 1.32f;
-	// 	_ang_sum_y_gyro += sensor_combine.gyro_rad[1]*(float)sensor_combine.gyro_integral_dt*1e-6f;
-	// 	_ang_sum_z_gyro += sensor_combine.gyro_rad[2]*(float)sensor_combine.gyro_integral_dt*1e-6f;
-	// 	_dt_sum_usec_gyro += sensor_combine.gyro_integral_dt;
-	// }
+	if (_sensor_combined_sub < 0) {
+			PX4_ERR("copy failed (%i)", errno);
+			
+			return ret;
+	}
+
+	if(orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine)  == PX4_OK){
+		_ang_sum_x_gyro += sensor_combine.gyro_rad[0]*(float)sensor_combine.gyro_integral_dt*1e-6f;
+		_ang_sum_y_gyro += sensor_combine.gyro_rad[1]*(float)sensor_combine.gyro_integral_dt*1e-6f;
+		_ang_sum_z_gyro += sensor_combine.gyro_rad[2]*(float)sensor_combine.gyro_integral_dt*1e-6f;
+		_dt_sum_usec_gyro += sensor_combine.gyro_integral_dt;
+	}
 	
-	// uint64_t timestamp_gyro = sensor_combined.timestamp;
-	// uint64_t dt_gyro = timestamp_gyro - _previous_collect_timestamp_gyro;
-	// _previous_collect_timestamp_gyro = timestamp_gyro;
+	uint64_t timestamp_gyro = sensor_combine.timestamp;
+	uint64_t dt_gyro = timestamp_gyro - _previous_collect_timestamp_gyro;
+	_previous_collect_timestamp_gyro = timestamp_gyro;
 
-
+	_dt_sum_usec_gyro+= dt_gyro;
 
 	readMotionCount(delta_x_raw, delta_y_raw);
 
@@ -666,13 +673,20 @@ PMW3901::collect()
 	}
 
 	/* No gyro on this board */
-	// float time_ratio= 1.0f;//(_flow_dt_sum_usec / _dt_sum_usec_gyro);
-	// report.gyro_x_rate_integral = static_cast<float>(_ang_sum_x_gyro*time_ratio);
-	// report.gyro_y_rate_integral = static_cast<float>(_ang_sum_y_gyro*time_ratio);
-	// report.gyro_z_rate_integral = static_cast<float>(_ang_sum_z_gyro*time_ratio);
-	report.gyro_x_rate_integral = NAN;
-	report.gyro_y_rate_integral = NAN;
-	report.gyro_z_rate_integral = NAN;
+	float time_ratio;
+	if (_flow_dt_sum_usec > 0 && _dt_sum_usec_gyro > 0) {
+		// calculate scale factor used to compensate for gyro data being summed across a different time period
+		time_ratio = (float)_flow_dt_sum_usec / (float)_dt_sum_usec_gyro;
+	} else {
+		// can't calculate so use 1
+		time_ratio = 1.0f;
+	}
+	report.gyro_x_rate_integral = static_cast<float>(_ang_sum_x_gyro*time_ratio);
+	report.gyro_y_rate_integral = static_cast<float>(_ang_sum_y_gyro*time_ratio);
+	report.gyro_z_rate_integral = static_cast<float>(_ang_sum_z_gyro*time_ratio);
+	// report.gyro_x_rate_integral = NAN;
+	// report.gyro_y_rate_integral = NAN;
+	// report.gyro_z_rate_integral = NAN;
 
 	// set (conservative) specs according to datasheet
 	report.max_flow_rate = 5.0f;       // Datasheet: 7.4 rad/s
@@ -743,7 +757,7 @@ PMW3901::start()
 {
 	/* reset the report ring and state machine */
 	_reports->flush();
-
+	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
 	/* schedule a cycle to start things */
 	work_queue(LPWORK, &_work, (worker_t)&PMW3901::cycle_trampoline, this, USEC2TICK(PMW3901_US));
 
@@ -755,7 +769,7 @@ PMW3901::start()
 	info.enabled = true;
 	info.ok = true;
 	info.subsystem_type = subsystem_info_s::SUBSYSTEM_TYPE_OPTICALFLOW;
-
+	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
 	if (_subsystem_pub != nullptr) {
 		orb_publish(ORB_ID(subsystem_info), _subsystem_pub, &info);
 
