@@ -630,7 +630,7 @@ PMW3901::collect()
 
 	// 45000 = 22hz publish rate to EKF => decrease to publish more data
 	
-	if (_flow_dt_sum_usec < 10000) {
+	if (_flow_dt_sum_usec < 15000) {
 
 		return ret;
 	}
@@ -674,7 +674,7 @@ PMW3901::collect()
 	report.gyro_z_rate_integral = NAN;
 
 	// set (conservative) specs according to datasheet
-	report.max_flow_rate = 3.0f;       // Datasheet: 7.4 rad/s
+	report.max_flow_rate = 5.0f;       // Datasheet: 7.4 rad/s
 	report.min_ground_distance = 0.1f; // Datasheet: 80mm
 	report.max_ground_distance = 30.0f; // Datasheet: infinity
 
