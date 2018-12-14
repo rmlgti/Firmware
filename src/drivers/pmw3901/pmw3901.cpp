@@ -668,25 +668,15 @@ PMW3901::collect()
 	}
 
 	/* No gyro on this board */
-	// float time_ratio;
-	// if (_flow_dt_sum_usec > 0 && _dt_sum_usec_gyro > 0) {
-	// 	// calculate scale factor used to compensate for gyro data being summed across a different time period
-	// 	time_ratio = (float)_flow_dt_sum_usec / (float)_dt_sum_usec_gyro;
-	// } else {
-	// 	// can't calculate so use 1
-	// 	time_ratio = 1.0f;
-	// }
-	// report.gyro_x_rate_integral = static_cast<float>(_ang_sum_x_gyro*time_ratio);
-	// report.gyro_y_rate_integral = static_cast<float>(_ang_sum_y_gyro*time_ratio);
-	// report.gyro_z_rate_integral = static_cast<float>(_ang_sum_z_gyro*time_ratio);
+
 	report.gyro_x_rate_integral = NAN;
 	report.gyro_y_rate_integral = NAN;
 	report.gyro_z_rate_integral = NAN;
 
 	// set (conservative) specs according to datasheet
-	report.max_flow_rate = 5.0f;       // Datasheet: 7.4 rad/s
+	report.max_flow_rate = 3.0f;       // Datasheet: 7.4 rad/s
 	report.min_ground_distance = 0.1f; // Datasheet: 80mm
-	report.max_ground_distance = 25.0f; // Datasheet: infinity
+	report.max_ground_distance = 30.0f; // Datasheet: infinity
 
 	_flow_dt_sum_usec = 0;
 	_flow_sum_x = 0;
