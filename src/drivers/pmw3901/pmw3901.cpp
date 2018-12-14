@@ -262,7 +262,7 @@ int
 PMW3901::sensorInit()
 {
 	uint8_t data[5];
-	// _sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
+
 	// Power on reset
 	writeRegister(0x3A, 0x5A);
 	usleep(5000);
@@ -273,8 +273,6 @@ PMW3901::sensorInit()
 	readRegister(0x04, &data[2], 1);
 	readRegister(0x05, &data[3], 1);
 	readRegister(0x06, &data[4], 1);
-	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
-
 	usleep(1000);
 
 	// set performance optimization registers
@@ -358,7 +356,7 @@ PMW3901::sensorInit()
 	writeRegister(0x7F, 0x00);
 	writeRegister(0x5A, 0x10);
 	writeRegister(0x54, 0x00);
-	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
+
 	return OK;
 
 }
@@ -387,10 +385,10 @@ PMW3901::init()
 	}
 
 	sensorInit();
-	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
+
 	/* allocate basic report buffers */
 	_reports = new ringbuffer::RingBuffer(2, sizeof(optical_flow_s));
-	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
+
 	if (_reports == nullptr) {
 		goto out;
 	}
@@ -398,8 +396,6 @@ PMW3901::init()
 	ret = OK;
 	_sensor_ok = true;
 	_previous_collect_timestamp = hrt_absolute_time();
-	
-	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
 
 out:
 	return ret;
@@ -603,10 +599,9 @@ PMW3901::collect()
 	}
 	sensor_combined_s sensor_combine= {};
 
-	//_ang_sum_x_gyro = orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine);
 
 	if (_sensor_combined_sub < 0) {
-			PX4_ERR("copy failed (%i)", errno);
+			PX4_ERR("subscription failed (%i)", errno);
 			
 			return ret;
 	}
@@ -635,7 +630,7 @@ PMW3901::collect()
 
 	// 45000 = 22hz publish rate to EKF => decrease to publish more data
 	
-	if (_flow_dt_sum_usec < 15000) {
+	if (_flow_dt_sum_usec < 10000) {
 
 		return ret;
 	}
@@ -673,25 +668,25 @@ PMW3901::collect()
 	}
 
 	/* No gyro on this board */
-	float time_ratio;
-	if (_flow_dt_sum_usec > 0 && _dt_sum_usec_gyro > 0) {
-		// calculate scale factor used to compensate for gyro data being summed across a different time period
-		time_ratio = (float)_flow_dt_sum_usec / (float)_dt_sum_usec_gyro;
-	} else {
-		// can't calculate so use 1
-		time_ratio = 1.0f;
-	}
-	report.gyro_x_rate_integral = static_cast<float>(_ang_sum_x_gyro*time_ratio);
-	report.gyro_y_rate_integral = static_cast<float>(_ang_sum_y_gyro*time_ratio);
-	report.gyro_z_rate_integral = static_cast<float>(_ang_sum_z_gyro*time_ratio);
-	// report.gyro_x_rate_integral = NAN;
-	// report.gyro_y_rate_integral = NAN;
-	// report.gyro_z_rate_integral = NAN;
+	// float time_ratio;
+	// if (_flow_dt_sum_usec > 0 && _dt_sum_usec_gyro > 0) {
+	// 	// calculate scale factor used to compensate for gyro data being summed across a different time period
+	// 	time_ratio = (float)_flow_dt_sum_usec / (float)_dt_sum_usec_gyro;
+	// } else {
+	// 	// can't calculate so use 1
+	// 	time_ratio = 1.0f;
+	// }
+	// report.gyro_x_rate_integral = static_cast<float>(_ang_sum_x_gyro*time_ratio);
+	// report.gyro_y_rate_integral = static_cast<float>(_ang_sum_y_gyro*time_ratio);
+	// report.gyro_z_rate_integral = static_cast<float>(_ang_sum_z_gyro*time_ratio);
+	report.gyro_x_rate_integral = NAN;
+	report.gyro_y_rate_integral = NAN;
+	report.gyro_z_rate_integral = NAN;
 
 	// set (conservative) specs according to datasheet
 	report.max_flow_rate = 5.0f;       // Datasheet: 7.4 rad/s
 	report.min_ground_distance = 0.1f; // Datasheet: 80mm
-	report.max_ground_distance = 5.0f; // Datasheet: infinity
+	report.max_ground_distance = 25.0f; // Datasheet: infinity
 
 	_flow_dt_sum_usec = 0;
 	_flow_sum_x = 0;
