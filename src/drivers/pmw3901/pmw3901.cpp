@@ -74,8 +74,6 @@
 #include <uORB/topics/subsystem_info.h>
 #include <uORB/topics/optical_flow.h>
 #include <uORB/topics/distance_sensor.h>
-#include <uORB/topics/sensor_gyro.h>
-#include <uORB/topics/sensor_combined.h>
 #include <board_config.h>
 
 /* Configuration Constants */
@@ -140,8 +138,6 @@ private:
 	int _class_instance;
 	int _orb_class_instance;
 
-	//gyro 
-	int	_sensor_combined_sub{-1};
 
 	orb_advert_t _optical_flow_pub;
 	orb_advert_t _subsystem_pub;
@@ -151,22 +147,10 @@ private:
 
 	uint64_t _previous_collect_timestamp;
 
-	//gyro
-	uint64_t _previous_collect_timestamp_gyro;
-
 	enum Rotation _yaw_rotation;
 	int _flow_sum_x = 0;
 	int _flow_sum_y = 0;
 	uint64_t _flow_dt_sum_usec = 0;
-
-
-	uint64_t _debug_dt_sum_usec = 0;
-
-	float _ang_sum_x_gyro = 0;
-	float _ang_sum_y_gyro = 0;
-	float _ang_sum_z_gyro = 0;
-	uint64_t _dt_sum_usec_gyro = 0;
-
 
 	/**
 	* Initialise the automatic measurement state machine and start it.
@@ -235,8 +219,6 @@ PMW3901::PMW3901(int bus, enum Rotation yaw_rotation) :
 	// work_cancel in the dtor will explode if we don't do this...
 	memset(&_work, 0, sizeof(_work));
 
-	//handle the motion calculation here instead of in ekf2
-	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
 
 }
 
@@ -254,8 +236,7 @@ PMW3901::~PMW3901()
 	perf_free(_sample_perf);
 	perf_free(_comms_errors);
 
-	orb_unsubscribe(_sensor_combined_sub);
-}
+
 
 
 int
@@ -509,7 +490,7 @@ PMW3901::read(device::file_t *filp, char *buffer, size_t buflen)
 		/* if there was no data, warn the caller */
 		return ret ? ret : -EAGAIN;
 	}
-	//_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
+
 	/* manual measurement - run one conversion */
 	do {
 		_reports->flush();
@@ -592,43 +573,12 @@ PMW3901::collect()
 	_flow_dt_sum_usec += dt_flow;
 
 
-	// gyro delta ang and delta t 
-
-	if (_sensor_combined_sub==-1){
-		_sensor_combined_sub= orb_subscribe(ORB_ID(sensor_combined));
-	}
-	sensor_combined_s sensor_combine= {};
-
-
-	if (_sensor_combined_sub < 0) {
-			PX4_ERR("subscription failed (%i)", errno);
-			
-			return ret;
-	}
-
-	if(orb_copy(ORB_ID(sensor_combined), _sensor_combined_sub, &sensor_combine)  == PX4_OK){
-		_ang_sum_x_gyro += sensor_combine.gyro_rad[0]*(float)sensor_combine.gyro_integral_dt*1e-6f;
-		_ang_sum_y_gyro += sensor_combine.gyro_rad[1]*(float)sensor_combine.gyro_integral_dt*1e-6f;
-		_ang_sum_z_gyro += sensor_combine.gyro_rad[2]*(float)sensor_combine.gyro_integral_dt*1e-6f;
-		_dt_sum_usec_gyro += sensor_combine.gyro_integral_dt;
-	}
-	
-	uint64_t timestamp_gyro = sensor_combine.timestamp;
-	uint64_t dt_gyro = timestamp_gyro - _previous_collect_timestamp_gyro;
-	_previous_collect_timestamp_gyro = timestamp_gyro;
-
-	_dt_sum_usec_gyro+= dt_gyro;
-
 	readMotionCount(delta_x_raw, delta_y_raw);
 
 	_flow_sum_x += delta_x_raw;
 	_flow_sum_y += delta_y_raw;
 
 
-
-
-
-	// 45000 = 22hz publish rate to EKF => decrease to publish more data
 	
 	if (_flow_dt_sum_usec < 15000) {
 
@@ -682,10 +632,6 @@ PMW3901::collect()
 	_flow_sum_x = 0;
 	_flow_sum_y = 0;
 
-	_dt_sum_usec_gyro = 0;
-	_ang_sum_x_gyro = 0;
-	_ang_sum_y_gyro = 0;
-	_ang_sum_z_gyro = 0;
 
 
 	if (_optical_flow_pub == nullptr) {
