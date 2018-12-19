@@ -182,6 +182,9 @@ public:
 		MAVLINK_MODE_IRIDIUM,
 		MAVLINK_MODE_MINIMAL,
 
+		// add External vision
+		MAVLINK_MODE_EV,
+
 		MAVLINK_MODE_COUNT
 	};
 
@@ -223,6 +226,8 @@ public:
 
 		case MAVLINK_MODE_MINIMAL:
 			return "Minimal";
+		case MAVLINK_MODE_EV:
+			return "EV";
 
 		default:
 			return "Unknown";
