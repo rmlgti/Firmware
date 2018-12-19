@@ -160,6 +160,7 @@ MavlinkReceiver::MavlinkReceiver(Mavlink *parent) :
 	_debug_value_pub(nullptr),
 	_debug_vect_pub(nullptr),
 	_debug_array_pub(nullptr),
+	_telem_status_pub(nullptr),
 	_gps_inject_data_pub(nullptr),
 	_command_ack_pub(nullptr),
 	_control_mode_sub(orb_subscribe(ORB_ID(vehicle_control_mode))),
@@ -1949,16 +1950,25 @@ MavlinkReceiver::handle_message_heartbeat(mavlink_message_t *msg)
 		mavlink_msg_heartbeat_decode(msg, &hb);
 
 		/* ignore own heartbeats, accept only heartbeats from GCS */
-		if (msg->sysid != mavlink_system.sysid && hb.type == MAV_TYPE_GCS) {
+		if (msg->sysid != mavlink_system.sysid || hb.type == MAV_TYPE_ONBOARD_CONTROLLER) {
 
 			telemetry_status_s &tstatus = _mavlink->get_telemetry_status();
 
 			/* set heartbeat time and topic time and publish -
 			 * the telem status also gets updated on telemetry events
 			 */
-			tstatus.heartbeat_time = tstatus.timestamp;
-			tstatus.system_id = msg->sysid;
-			tstatus.component_id = msg->compid;
+			tstatus.heartbeat_time = hrt_absolute_time();
+			tstatus.remote_system_id = msg->sysid;
+			tstatus.remote_component_id = msg->compid;
+			tstatus.remote_type = hb.type;
+			tstatus.remote_system_status = hb.system_status;
+
+			if (_telem_status_pub == nullptr) {
+				_telem_status_pub = orb_advertise(ORB_ID(telemetry_status), &tstatus);
+
+			} else {
+				orb_publish(ORB_ID(telemetry_status), _telem_status_pub, &tstatus);
+			}
 		}
 	}
 }
