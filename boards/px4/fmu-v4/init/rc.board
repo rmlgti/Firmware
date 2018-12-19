@@ -98,4 +98,6 @@ then
 	frsky_telemetry start -d /dev/ttyS6 -t 15
 fi
 
+pmw3901 start
+isl2950 start
 px4flow start &
