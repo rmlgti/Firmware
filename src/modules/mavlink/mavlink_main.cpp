@@ -1775,13 +1775,27 @@ Mavlink::configure_streams_to_default(const char *configure_single_stream)
 		break;
 
 	case MAVLINK_MODE_EV:
-		configure_stream_local("CAMERA_TRIGGER", unlimited_rate);
-		configure_stream_local("CAMERA_IMAGE_CAPTURED", unlimited_rate);
-		configure_stream_local("DISTANCE_SENSOR", 10.0f);
-		configure_stream_local("HEARTBEAT", 10.0f);
-		configure_stream_local("HIGHRES_IMU", 250.0f);
-		configure_stream_local("LOCAL_POSITION_NED", 30.0f);
-		configure_stream_local("TRAJECTORY_REPRESENTATION_WAYPOINTS", 5.0f);
+		configure_stream_local("ALTITUDE", 10.0f); // for avoidance
+		configure_stream_local("ATTITUDE", 25.0f);
+		configure_stream_local("ATTITUDE_TARGET", 10.0f);
+		configure_stream_local("CAMERA_TRIGGER", unlimited_rate); // for VIO
+		configure_stream_local("CAMERA_IMAGE_CAPTURED", unlimited_rate); //for VIO
+		configure_stream_local("DISTANCE_SENSOR", 10.0f);		// for avoidance
+		configure_stream_local("ESTIMATOR_STATUS", 1.0f);
+		configure_stream_local("EXTENDED_SYS_STATE", 1.0f);
+		configure_stream_local("GLOBAL_POSITION_INT", 10.0f);
+		configure_stream_local("GPS_RAW_INT", 1.0f);
+		configure_stream_local("HOME_POSITION", 0.5f);
+		configure_stream_local("HIGHRES_IMU", 250.0f);		// for VIO
+		configure_stream_local("LOCAL_POSITION_NED", 30.0f); //for VIO and avoidance
+		configure_stream_local("RC_CHANNELS", 5.0f);
+		configure_stream_local("SERVO_OUTPUT_RAW_0", 1.0f);
+		configure_stream_local("SYS_STATUS", 5.0f);
+		configure_stream_local("SYSTEM_TIME", 1.0f);
+		configure_stream_local("TRAJECTORY_REPRESENTATION_WAYPOINTS", 5.0f); // for avoidance
+		configure_stream_local("VFR_HUD", 25.0f);
+		configure_stream_local("WIND_COV", 2.0f);
+		break;
 
 	case MAVLINK_MODE_OSD:
 		configure_stream_local("ALTITUDE", 1.0f);
