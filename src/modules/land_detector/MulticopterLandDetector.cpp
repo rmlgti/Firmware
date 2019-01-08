@@ -156,6 +156,11 @@ bool MulticopterLandDetector::_get_ground_contact_state()
 		return true;
 	}
 
+	// if already landed and that the drone has low thrust, it has to be on the ground
+	if (_state == LandDetectionState::LANDED && _has_low_thrust()) {
+		return true;
+	}
+
 	// land speed threshold
 	float land_speed_threshold = 0.9f * math::max(_params.landSpeed, 0.1f);
 
